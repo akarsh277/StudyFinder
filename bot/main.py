@@ -1,0 +1,145 @@
+import logging
+from telegram import Update
+from telegram.request import HTTPXRequest
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
+)
+from config import BOT_TOKEN
+from init_db import init_db
+from bot.handlers.start import start_handler
+from bot.handlers.access import (
+    access_start_callback,
+    access_semester_callback,
+    access_subject_callback,
+    access_type_callback,
+    download_resource_callback,
+)
+from bot.handlers.upload import (
+    upload_start_callback,
+    upload_semester_callback,
+    upload_subject_callback,
+    upload_type_callback,
+    upload_title_handler,
+    upload_file_handler,
+    cancel_upload_handler,
+)
+from bot.handlers.admin import (
+    approve_resource_callback,
+    reject_resource_callback,
+)
+from bot.states.conversation import (
+    SELECT_SEMESTER,
+    SELECT_SUBJECT,
+    SELECT_TYPE,
+    ENTER_TITLE,
+    UPLOAD_FILE,
+)
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
+async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log errors caused by updates and send user-friendly message if possible."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ An unexpected error occurred. Please try again with /start."
+            )
+        except Exception:
+            pass
+
+
+def main() -> None:
+    """Initialize database and start the Telegram bot using polling."""
+    # Ensure database tables and initial seed data exist
+    init_db()
+
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
+        logger.error("BOT_TOKEN is missing or invalid. Please check your .env file.")
+        return
+
+    # Set custom network request timeouts to handle network latency gracefully
+    request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=30.0,
+
+    )
+
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .get_updates_request(request)
+        .build()
+    )
+
+    # Upload ConversationHandler
+    upload_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(upload_start_callback, pattern="^(main_upload|start_upload_flow)$"),
+            CommandHandler("upload", upload_start_callback),
+        ],
+        states={
+            SELECT_SEMESTER: [
+                CallbackQueryHandler(upload_semester_callback, pattern="^upload_sem_")
+            ],
+            SELECT_SUBJECT: [
+                CallbackQueryHandler(upload_subject_callback, pattern="^upload_subj_")
+            ],
+            SELECT_TYPE: [
+                CallbackQueryHandler(upload_type_callback, pattern="^upload_type_")
+            ],
+            ENTER_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, upload_title_handler)
+            ],
+            UPLOAD_FILE: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, upload_file_handler)
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_upload_handler),
+            CommandHandler("start", start_handler),
+        ],
+        per_user=True,
+        per_chat=True,
+    )
+
+    # Register handlers
+    application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(upload_conv_handler)
+
+    # Access Resources callbacks
+    application.add_handler(CallbackQueryHandler(access_start_callback, pattern="^main_access$"))
+    application.add_handler(CallbackQueryHandler(access_semester_callback, pattern="^access_sem_"))
+    application.add_handler(CallbackQueryHandler(access_subject_callback, pattern="^access_subj_"))
+    application.add_handler(CallbackQueryHandler(access_type_callback, pattern="^access_type_"))
+    application.add_handler(CallbackQueryHandler(download_resource_callback, pattern="^download_"))
+
+    # Admin Chief review callbacks
+    application.add_handler(CallbackQueryHandler(approve_resource_callback, pattern="^approve_"))
+    application.add_handler(CallbackQueryHandler(reject_resource_callback, pattern="^reject_"))
+
+    # Register error handler
+    application.add_error_handler(global_error_handler)
+
+    logger.info("StudyFind Bot (@HighlessbestBot) is starting via polling...")
+    application.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    main()

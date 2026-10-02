@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+*.env
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+test_db.py
+
+# Tooling metadata
+.agent/
+.agents/
+.gsd/
+.gemini/
