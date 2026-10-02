@@ -3,7 +3,22 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
-from database.crud import get_resource_by_id, update_resource_status
+from database.crud import (
+    get_resource_by_id,
+    update_resource_status,
+    delete_resource,
+    get_subjects_by_semester,
+    get_subject_by_id,
+    get_approved_resources,
+)
+from bot.keyboards.menus import (
+    get_semester_keyboard,
+    get_subjects_keyboard,
+    get_resource_types_keyboard,
+    get_resources_download_keyboard,
+    get_confirm_delete_keyboard,
+    get_unavailable_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +160,7 @@ async def delete_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     if update.message:
         await update.message.reply_text(
-            text="🗑️ Select Semester to manage/delete resources:",
+            text="Select Semester to manage/delete resources:",
             reply_markup=get_semester_keyboard(prefix="delete_sem", back_callback="back_to_main")
         )
 
@@ -176,7 +191,7 @@ async def delete_semester_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     await query.edit_message_text(
-        text="🗑️ Select Subject to delete resources from:",
+        text="Select Subject to delete resources from:",
         reply_markup=get_subjects_keyboard(subjects, prefix="delete_subj", back_callback="back_to_main")
     )
 
@@ -202,7 +217,7 @@ async def delete_subject_callback(update: Update, context: ContextTypes.DEFAULT_
     back_cb = f"delete_sem_{semester}" if semester else "back_to_main"
 
     await query.edit_message_text(
-        text="🗑️ Select Resource Type:",
+        text="Select Resource Type:",
         reply_markup=get_resource_types_keyboard(prefix="delete_type", back_callback=back_cb)
     )
 
@@ -244,7 +259,7 @@ async def delete_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    header_text = f"🗑️ Delete Resources in {subject_name} {resource_type.capitalize()}:\n\nClick '🗑️ Delete' next to a resource to remove it:"
+    header_text = f"Delete Resources in {subject_name} {resource_type.capitalize()}:\n\nClick ' Delete' next to a resource to remove it:"
     await query.edit_message_text(
         text=header_text,
         reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=True)
