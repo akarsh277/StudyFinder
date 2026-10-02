@@ -97,15 +97,15 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 
 def main() -> None:
     """Initialize database and start the Telegram bot using polling."""
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
+        logger.error("❌ CRITICAL: BOT_TOKEN is missing or invalid! Please add BOT_TOKEN in Render Environment Variables.")
+        sys.exit(1)
+
     # Start background health check HTTP server for Render/Koyeb Free Web Service
     threading.Thread(target=start_health_server, daemon=True).start()
 
     # Ensure database tables and initial seed data exist
     init_db()
-
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
-        logger.error("BOT_TOKEN is missing or invalid. Please check your .env file.")
-        return
 
     # Set custom network request timeouts to handle network latency gracefully
     request = HTTPXRequest(
