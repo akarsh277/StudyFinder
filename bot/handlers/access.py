@@ -3,6 +3,7 @@ import logging
 from telegram import Update
 # pyrefly: ignore [missing-import]
 from telegram.ext import ContextTypes
+from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import (
     get_subjects_by_semester,
@@ -135,9 +136,12 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     icon = type_icon_map.get(resource_type, "📚")
     header_text = f"{icon} {subject_name} {resource_type.capitalize()}\n\nClick a button below to download the resource:"
 
+    user = update.effective_user
+    is_chief = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
+
     await query.edit_message_text(
         text=header_text,
-        reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb)
+        reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=is_chief)
     )
 
 

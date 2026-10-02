@@ -68,19 +68,37 @@ def get_resource_types_keyboard(
 
 def get_resources_download_keyboard(
     resources: List[Resource],
-    back_callback: Optional[str] = None
+    back_callback: Optional[str] = None,
+    is_chief: bool = False
 ) -> InlineKeyboardMarkup:
     """Return keyboard with individual download buttons for available resources."""
     keyboard = []
     for res in resources:
         button_text = f"⬇️ {res.title}"
-        keyboard.append([
-            InlineKeyboardButton(button_text, callback_data=f"download_{res.id}")
-        ])
+        if is_chief:
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"download_{res.id}"),
+                InlineKeyboardButton("🗑️ Delete", callback_data=f"confirm_del_{res.id}")
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"download_{res.id}")
+            ])
     if back_callback:
         keyboard.append([
             InlineKeyboardButton("🔙 Back", callback_data=back_callback)
         ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_confirm_delete_keyboard(resource_id: int, back_callback: Optional[str] = None) -> InlineKeyboardMarkup:
+    """Return confirmation keyboard for deleting a resource."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🗑️ Yes, Delete", callback_data=f"do_delete_{resource_id}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=back_callback or "main_access")
+        ]
+    ]
     return InlineKeyboardMarkup(keyboard)
 
 

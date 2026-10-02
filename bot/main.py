@@ -43,6 +43,12 @@ from bot.handlers.upload import (
 from bot.handlers.admin import (
     approve_resource_callback,
     reject_resource_callback,
+    delete_command_handler,
+    delete_semester_callback,
+    delete_subject_callback,
+    delete_type_callback,
+    confirm_delete_callback,
+    execute_delete_callback,
 )
 from bot.handlers.analytics import analytics_handler
 from bot.states.conversation import (
@@ -170,8 +176,14 @@ def main() -> None:
 
     # Admin Chief review callbacks & commands
     application.add_handler(CommandHandler("analytics", analytics_handler))
+    application.add_handler(CommandHandler("delete", delete_command_handler))
     application.add_handler(CallbackQueryHandler(approve_resource_callback, pattern="^approve_"))
     application.add_handler(CallbackQueryHandler(reject_resource_callback, pattern="^reject_"))
+    application.add_handler(CallbackQueryHandler(delete_semester_callback, pattern="^delete_sem_"))
+    application.add_handler(CallbackQueryHandler(delete_subject_callback, pattern="^delete_subj_"))
+    application.add_handler(CallbackQueryHandler(delete_type_callback, pattern="^delete_type_"))
+    application.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern="^confirm_del_"))
+    application.add_handler(CallbackQueryHandler(execute_delete_callback, pattern="^do_delete_"))
 
     # Register error handler
     application.add_error_handler(global_error_handler)

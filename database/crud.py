@@ -52,6 +52,16 @@ def get_resource_by_id(db: Session, resource_id: int) -> Optional[Resource]:
     return db.query(Resource).filter(Resource.id == resource_id).first()
 
 
+def delete_resource(db: Session, resource_id: int) -> bool:
+    """Delete a resource by ID from DB."""
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    if resource:
+        db.delete(resource)
+        db.commit()
+        return True
+    return False
+
+
 def create_resource(
     db: Session,
     title: str,
