@@ -22,6 +22,19 @@ from bot.keyboards.menus import (
 logger = logging.getLogger(__name__)
 
 
+async def back_to_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle returning to main menu."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        from bot.handlers.start import START_MESSAGE
+        from bot.keyboards.menus import get_main_menu_keyboard
+        await query.edit_message_text(
+            text=START_MESSAGE,
+            reply_markup=get_main_menu_keyboard()
+        )
+
+
 async def access_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle '📚 Access Resources' click - prompt user to Choose Semester."""
     query = update.callback_query
@@ -29,7 +42,7 @@ async def access_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     await query.edit_message_text(
         text="Choose Semester",
-        reply_markup=get_semester_keyboard(prefix="access_sem")
+        reply_markup=get_semester_keyboard(prefix="access_sem", back_callback="back_to_main")
     )
 
 
@@ -53,13 +66,13 @@ async def access_semester_callback(update: Update, context: ContextTypes.DEFAULT
     if not subjects:
         await query.edit_message_text(
             text="⚠️ Source unavailable",
-            reply_markup=get_unavailable_keyboard()
+            reply_markup=get_unavailable_keyboard(back_callback="main_access")
         )
         return
 
     await query.edit_message_text(
         text="Select Subject",
-        reply_markup=get_subjects_keyboard(subjects, prefix="access_subj")
+        reply_markup=get_subjects_keyboard(subjects, prefix="access_subj", back_callback="main_access")
     )
 
 
@@ -75,9 +88,12 @@ async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("Invalid subject selected.")
         return
 
+    semester = context.user_data.get("access_semester")
+    back_cb = f"access_sem_{semester}" if semester else "main_access"
+
     await query.edit_message_text(
         text="Select Resource Type",
-        reply_markup=get_resource_types_keyboard(prefix="access_type")
+        reply_markup=get_resource_types_keyboard(prefix="access_type", back_callback=back_cb)
     )
 
 
@@ -96,6 +112,8 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("Session expired. Please start again with /start.")
         return
 
+    back_cb = f"access_subj_{subject_id}"
+
     try:
         with get_db() as db:
             subject = get_subject_by_id(db, subject_id)
@@ -109,7 +127,7 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if not resources:
         await query.edit_message_text(
             text="⚠️ Source unavailable",
-            reply_markup=get_unavailable_keyboard()
+            reply_markup=get_unavailable_keyboard(back_callback=back_cb)
         )
         return
 
@@ -119,7 +137,7 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.edit_message_text(
         text=header_text,
-        reply_markup=get_resources_download_keyboard(resources)
+        reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb)
     )
 
 

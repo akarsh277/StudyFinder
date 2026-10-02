@@ -28,12 +28,12 @@ async def upload_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer()
         await query.edit_message_text(
             text="Select Semester",
-            reply_markup=get_semester_keyboard(prefix="upload_sem")
+            reply_markup=get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
         )
     else:
         await update.message.reply_text(
             text="Select Semester",
-            reply_markup=get_semester_keyboard(prefix="upload_sem")
+            reply_markup=get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
         )
     return SELECT_SEMESTER
 
@@ -60,7 +60,7 @@ async def upload_semester_callback(update: Update, context: ContextTypes.DEFAULT
 
     await query.edit_message_text(
         text="Select Subject",
-        reply_markup=get_subjects_keyboard(subjects, prefix="upload_subj")
+        reply_markup=get_subjects_keyboard(subjects, prefix="upload_subj", back_callback="main_upload")
     )
     return SELECT_SUBJECT
 
@@ -77,9 +77,12 @@ async def upload_subject_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("Invalid subject selected.")
         return ConversationHandler.END
 
+    semester = context.user_data.get("upload_semester")
+    back_cb = f"upload_sem_{semester}" if semester else "main_upload"
+
     await query.edit_message_text(
         text="Select Resource Type",
-        reply_markup=get_resource_types_keyboard(prefix="upload_type")
+        reply_markup=get_resource_types_keyboard(prefix="upload_type", back_callback=back_cb)
     )
     return SELECT_TYPE
 

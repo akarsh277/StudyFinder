@@ -29,6 +29,7 @@ from bot.handlers.access import (
     access_subject_callback,
     access_type_callback,
     download_resource_callback,
+    back_to_main_callback,
 )
 from bot.handlers.upload import (
     upload_start_callback,
@@ -159,7 +160,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(upload_conv_handler)
 
-    # Access Resources callbacks
+    # Access Resources & Navigation callbacks
+    application.add_handler(CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"))
     application.add_handler(CallbackQueryHandler(access_start_callback, pattern="^main_access$"))
     application.add_handler(CallbackQueryHandler(access_semester_callback, pattern="^access_sem_"))
     application.add_handler(CallbackQueryHandler(access_subject_callback, pattern="^access_subj_"))
