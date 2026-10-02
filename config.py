@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-BOT_TOKEN: str = os.getenv("BOT_TOKEN", "8571722863:AAHSfklN9pJya_IGnM7sw56-AMnDNwyKeoc")
+BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 CHIEF_TELEGRAM_ID_RAW = os.getenv("CHIEF_TELEGRAM_ID", "0")
 
 try:

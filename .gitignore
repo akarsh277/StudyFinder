@@ -25,8 +25,14 @@ env/
 Thumbs.db
 test_db.py
 
-# Tooling metadata
+# Tooling metadata & GSD framework
 .agent/
 .agents/
 .gsd/
 .gemini/
+GSD-STYLE.md
+PROJECT_RULES.md
+VERSION
+adapters/
+model_capabilities.yaml
+scripts/
