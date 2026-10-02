@@ -1,5 +1,7 @@
 import logging
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database.models import User, Subject, Resource
 
@@ -113,3 +115,74 @@ def seed_initial_subjects(db: Session) -> None:
         if not existing:
             db.add(Subject(name=item["name"], semester=item["semester"]))
     db.commit()
+
+
+def increment_resource_download(db: Session, resource_id: int) -> None:
+    """Increment download_count for a resource upon successful delivery."""
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    if resource:
+        resource.download_count = (resource.download_count or 0) + 1
+        db.commit()
+
+
+def get_analytics_data(db: Session) -> Dict[str, Any]:
+    """Calculate all StudyFind analytics metrics directly from the database using SQL aggregations."""
+    now = datetime.utcnow()
+    start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    seven_days_ago = now - timedelta(days=7)
+
+    # User statistics
+    total_users = db.query(func.count(User.id)).scalar() or 0
+    users_today = db.query(func.count(User.id)).filter(User.created_at >= start_of_today).scalar() or 0
+    users_week = db.query(func.count(User.id)).filter(User.created_at >= seven_days_ago).scalar() or 0
+
+    # Resource statistics
+    total_resources = db.query(func.count(Resource.id)).scalar() or 0
+    approved_resources = db.query(func.count(Resource.id)).filter(Resource.status == "APPROVED").scalar() or 0
+    pending_resources = db.query(func.count(Resource.id)).filter(Resource.status == "PENDING").scalar() or 0
+    rejected_resources = db.query(func.count(Resource.id)).filter(Resource.status == "REJECTED").scalar() or 0
+
+    # Total downloads
+    total_downloads = db.query(func.coalesce(func.sum(Resource.download_count), 0)).scalar() or 0
+
+    # Top resources (Top 5 approved resources ordered by download_count desc)
+    top_resources_query = (
+        db.query(Resource.title, Resource.download_count)
+        .filter(Resource.status == "APPROVED")
+        .order_by(Resource.download_count.desc(), Resource.id.asc())
+        .limit(5)
+        .all()
+    )
+    top_resources = [
+        {"title": r.title, "downloads": r.download_count or 0}
+        for r in top_resources_query
+    ]
+
+    # Top subjects (Top 5 subjects ordered by sum of downloads of their approved resources desc)
+    top_subjects_query = (
+        db.query(Subject.name, func.coalesce(func.sum(Resource.download_count), 0).label("total_downloads"))
+        .join(Resource, Subject.id == Resource.subject_id)
+        .filter(Resource.status == "APPROVED")
+        .group_by(Subject.id, Subject.name)
+        .order_by(func.sum(Resource.download_count).desc(), Subject.name.asc())
+        .limit(5)
+        .all()
+    )
+    top_subjects = [
+        {"name": s.name, "downloads": s.total_downloads or 0}
+        for s in top_subjects_query
+    ]
+
+    return {
+        "total_users": total_users,
+        "users_today": users_today,
+        "users_week": users_week,
+        "total_resources": total_resources,
+        "approved_resources": approved_resources,
+        "pending_resources": pending_resources,
+        "rejected_resources": rejected_resources,
+        "total_downloads": total_downloads,
+        "top_resources": top_resources,
+        "top_subjects": top_subjects,
+    }
+

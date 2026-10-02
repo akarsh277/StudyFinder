@@ -43,6 +43,7 @@ from bot.handlers.admin import (
     approve_resource_callback,
     reject_resource_callback,
 )
+from bot.handlers.analytics import analytics_handler
 from bot.states.conversation import (
     SELECT_SEMESTER,
     SELECT_SUBJECT,
@@ -165,7 +166,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(access_type_callback, pattern="^access_type_"))
     application.add_handler(CallbackQueryHandler(download_resource_callback, pattern="^download_"))
 
-    # Admin Chief review callbacks
+    # Admin Chief review callbacks & commands
+    application.add_handler(CommandHandler("analytics", analytics_handler))
     application.add_handler(CallbackQueryHandler(approve_resource_callback, pattern="^approve_"))
     application.add_handler(CallbackQueryHandler(reject_resource_callback, pattern="^reject_"))
 

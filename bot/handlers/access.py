@@ -4,7 +4,13 @@ from telegram import Update
 # pyrefly: ignore [missing-import]
 from telegram.ext import ContextTypes
 from database.connection import get_db
-from database.crud import get_subjects_by_semester, get_subject_by_id, get_approved_resources, get_resource_by_id
+from database.crud import (
+    get_subjects_by_semester,
+    get_subject_by_id,
+    get_approved_resources,
+    get_resource_by_id,
+    increment_resource_download,
+)
 from bot.keyboards.menus import (
     get_semester_keyboard,
     get_subjects_keyboard,
@@ -148,6 +154,11 @@ async def download_resource_callback(update: Update, context: ContextTypes.DEFAU
             document=file_id,
             caption=f"📄 {title}"
         )
+        try:
+            with get_db() as db:
+                increment_resource_download(db, resource_id)
+        except Exception as ex:
+            logger.error(f"Error incrementing download count for resource {resource_id}: {ex}")
     except Exception as e:
         logger.error(f"Error sending document {file_id}: {e}")
         await query.message.reply_text("⚠️ Failed to send document. The file may have expired on Telegram.")

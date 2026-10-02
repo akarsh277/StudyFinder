@@ -41,6 +41,7 @@ class Resource(Base):
     file_name = Column(String(255), nullable=True)
     uploaded_by = Column(BigInteger, nullable=False)  # Telegram user ID
     status = Column(String(50), default="PENDING", nullable=False)  # PENDING, APPROVED, REJECTED
+    download_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     subject = relationship("Subject", back_populates="resources")
