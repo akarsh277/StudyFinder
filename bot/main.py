@@ -1,4 +1,7 @@
+import os
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.request import HTTPXRequest
 from telegram.ext import (
@@ -49,6 +52,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """HTTP Health check handler allowing deployment as a Free Web Service on Render/Koyeb."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"StudyFind Bot is running live!")
+
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP access logging
+
+
+def start_health_server():
+    """Start background HTTP health check server for cloud Web Service platforms."""
+    try:
+        port = int(os.getenv("PORT", "10000"))
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        logger.info(f"Health check HTTP server listening on port {port}")
+        server.serve_forever()
+    except Exception as e:
+        logger.warning(f"Health check server error: {e}")
+
+
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors caused by updates and send user-friendly message if possible."""
     logger.error("Exception while handling an update:", exc_info=context.error)
@@ -64,6 +90,9 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 
 def main() -> None:
     """Initialize database and start the Telegram bot using polling."""
+    # Start background health check HTTP server for Render/Koyeb Free Web Service
+    threading.Thread(target=start_health_server, daemon=True).start()
+
     # Ensure database tables and initial seed data exist
     init_db()
 
@@ -77,7 +106,6 @@ def main() -> None:
         read_timeout=30.0,
         write_timeout=30.0,
         pool_timeout=30.0,
-
     )
 
     application = (
