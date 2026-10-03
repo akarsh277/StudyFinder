@@ -36,20 +36,19 @@ async def analytics_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         top_resources_lines.append("No resources available.")
 
-    # Format TOP SUBJECTS section
-    top_subjects_lines = []
-    if data["top_subjects"]:
-        for idx, subj in enumerate(data["top_subjects"], start=1):
-            top_subjects_lines.append(f"{idx}. {subj['name']} — {subj['downloads']} downloads")
-    else:
-        top_subjects_lines.append("No subject downloads yet.")
+    def fmt(n: int) -> str:
+        if n >= 1000:
+            return f"{n/1000:.1f}K".replace(".0K", "K")
+        return f"{n:,}"
 
     message = (
-        "📊 StudyFind Analytics\n\n"
-        "👥 USERS\n"
-        f"• Total Users: {data['total_users']}\n"
-        f"• New Today: {data['users_today']}\n"
-        f"• New This Week: {data['users_week']}\n\n"
+        "📊 Analytics (Last 30 Days)\n\n"
+        f"👥 {fmt(data['active_visitors'])} Active Visitors\n"
+        f"👤 {fmt(data['total_users'])} Total Registered Users\n"
+        f"📄 {fmt(data['total_views'])} Views & Interactions\n"
+        f"📉 {data['bounce_rate']}% Bounce Rate\n"
+        f"🔥 Peak Day: {fmt(data['peak_visitors'])} visitors & {fmt(data['peak_views'])} views\n"
+        f"📌 {data['top_section_name']} alone reached {fmt(data['top_section_views'])} views & {fmt(data['top_section_downloads'])} downloads\n\n"
         "📚 RESOURCES\n"
         f"• Total: {data['total_resources']}\n"
         f"• Approved: {data['approved_resources']}\n"
@@ -58,14 +57,7 @@ async def analytics_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "⬇️ DOWNLOADS\n"
         f"• Total Downloads: {data['total_downloads']}\n\n"
         "🔥 TOP RESOURCES\n"
-        + "\n".join(top_resources_lines) + "\n\n"
-        "📚 TOP SUBJECTS\n"
-        + "\n".join(top_subjects_lines) + "\n\n"
-        "📤 CONTRIBUTIONS\n"
-        f"• Submitted: {data['total_resources']}\n"
-        f"• Approved: {data['approved_resources']}\n"
-        f"• Pending: {data['pending_resources']}\n"
-        f"• Rejected: {data['rejected_resources']}"
+        + "\n".join(top_resources_lines)
     )
 
     if update.message:

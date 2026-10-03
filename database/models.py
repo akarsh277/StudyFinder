@@ -48,3 +48,16 @@ class Resource(Base):
 
     def __repr__(self):
         return f"<Resource(id={self.id}, title='{self.title}', semester='{self.semester}', status='{self.status}')>"
+
+
+class UserEvent(Base):
+    __tablename__ = "user_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(BigInteger, nullable=False, index=True)
+    event_type = Column(String(50), nullable=False)
+    details = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<UserEvent(id={self.id}, telegram_id={self.telegram_id}, event_type='{self.event_type}')>"

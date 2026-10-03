@@ -11,6 +11,7 @@ from database.crud import (
     get_approved_resources,
     get_resource_by_id,
     increment_resource_download,
+    log_user_event,
 )
 from bot.keyboards.menus import (
     get_semester_keyboard,
@@ -59,6 +60,8 @@ async def access_semester_callback(update: Update, context: ContextTypes.DEFAULT
     try:
         with get_db() as db:
             subjects = get_subjects_by_semester(db, semester)
+            if update.effective_user:
+                log_user_event(db, update.effective_user.id, "VIEW_SEMESTER", semester)
     except Exception as e:
         logger.error(f"Error fetching subjects for {semester}: {e}")
         await query.edit_message_text("⚠️ Database error occurred. Please try again later.")
@@ -91,6 +94,13 @@ async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_
 
     semester = context.user_data.get("access_semester")
     back_cb = f"access_sem_{semester}" if semester else "main_access"
+
+    try:
+        with get_db() as db:
+            if update.effective_user:
+                log_user_event(db, update.effective_user.id, "VIEW_SUBJECT", str(subject_id))
+    except Exception:
+        pass
 
     await query.edit_message_text(
         text="Select Resource Type",
@@ -179,6 +189,8 @@ async def download_resource_callback(update: Update, context: ContextTypes.DEFAU
         try:
             with get_db() as db:
                 increment_resource_download(db, resource_id)
+                if update.effective_user:
+                    log_user_event(db, update.effective_user.id, "DOWNLOAD", str(resource_id))
         except Exception as ex:
             logger.error(f"Error incrementing download count for resource {resource_id}: {ex}")
     except Exception as e:

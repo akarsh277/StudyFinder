@@ -3,14 +3,14 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
-from database.crud import get_or_create_user
+from database.crud import get_or_create_user, log_user_event
 from bot.keyboards.menus import get_main_menu_keyboard
 
 logger = logging.getLogger(__name__)
 
 START_MESSAGE = """Hello Maawa!!
 Notes ledha,
-Digulu endhuku? Dhandaga nenunna neeku andagaa 🫶🏻"""
+Digulu endhuku Dhandaga nenu unna neeku Andagaa 🫶🏻"""
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -24,6 +24,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         with get_db() as db:
             get_or_create_user(db, telegram_id=user.id, username=user.username, role=role)
+            log_user_event(db, user.id, "START")
     except Exception as e:
         logger.error(f"Error registering user in start_handler: {e}")
 
