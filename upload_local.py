@@ -31,8 +31,9 @@ async def upload_local_file(
         print(f"Error: File not found at path: {file_path}", flush=True)
         return
 
-    if not file_path.lower().endswith(".pdf"):
-        print(f"Error: File '{file_path}' must be a PDF (.pdf).", flush=True)
+    allowed_exts = (".pdf", ".doc", ".docx")
+    if not any(file_path.lower().endswith(ext) for ext in allowed_exts):
+        print(f"Error: File '{file_path}' must be a PDF, DOC, or DOCX document (.pdf, .doc, .docx).", flush=True)
         return
 
     file_name = os.path.basename(file_path)

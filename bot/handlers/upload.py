@@ -66,9 +66,25 @@ async def upload_semester_callback(update: Update, context: ContextTypes.DEFAULT
 
 
 async def upload_subject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle subject selection in upload flow - prompt for resource type."""
+    """Handle subject selection in upload flow - prompt for resource type or jump to title for combined PYQ."""
     query = update.callback_query
     await query.answer()
+
+    if query.data == "upload_subj_pyq_all":
+        semester = context.user_data.get("upload_semester")
+        context.user_data["upload_resource_type"] = "PYQ"
+        try:
+            with get_db() as db:
+                subjects = get_subjects_by_semester(db, semester)
+                if subjects:
+                    context.user_data["upload_subject_id"] = subjects[0].id
+                else:
+                    context.user_data["upload_subject_id"] = 1
+        except Exception:
+            context.user_data["upload_subject_id"] = 1
+
+        await query.edit_message_text(text="📝 Enter the title for the PYQ paper(s).\n\nExample: Combined PYQs 2022-2024")
+        return ENTER_TITLE
 
     try:
         subject_id = int(query.data.replace("upload_subj_", ""))
@@ -100,7 +116,7 @@ async def upload_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def upload_title_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle title entry - prompt user to upload PDF file."""
+    """Handle title entry - prompt user to upload document file."""
     title = update.message.text.strip()
     if not title:
         await update.message.reply_text("Title cannot be empty. Please enter a valid resource title.")
@@ -109,28 +125,31 @@ async def upload_title_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["upload_title"] = title
 
     await update.message.reply_text(
-        "Please upload the resource document (PDF file)."
+        "Please upload the resource document (.pdf, .doc, or .docx file)."
     )
     return UPLOAD_FILE
 
 
 async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle file upload, validate PDF, save to DB with PENDING status, and notify Chief."""
+    """Handle file upload, validate PDF/DOC/DOCX, save to DB with PENDING status, and notify Chief."""
     user = update.effective_user
     doc = update.message.document
 
     if not doc:
         await update.message.reply_text(
-            "⚠️ Unsupported file or content. Please upload a valid PDF document."
+            "⚠️ Unsupported file or content. Please upload a valid document (.pdf, .doc, .docx)."
         )
         return UPLOAD_FILE
 
-    # File validation (PDF format check)
-    file_name = doc.file_name or ""
-    mime_type = doc.mime_type or ""
-    if not (file_name.lower().endswith(".pdf") or "pdf" in mime_type.lower()):
+    # File validation (.pdf, .doc, .docx format check)
+    file_name = (doc.file_name or "").lower()
+    mime_type = (doc.mime_type or "").lower()
+    allowed_exts = (".pdf", ".doc", ".docx")
+    allowed_mimes = ("pdf", "msword", "wordprocessingml")
+
+    if not (any(file_name.endswith(ext) for ext in allowed_exts) or any(m in mime_type for m in allowed_mimes)):
         await update.message.reply_text(
-            "⚠️ Unsupported file type. Please upload a PDF document (.pdf)."
+            "⚠️ Unsupported file type. Please upload a PDF, DOC, or DOCX document (.pdf, .doc, .docx)."
         )
         return UPLOAD_FILE
 

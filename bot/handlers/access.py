@@ -9,6 +9,7 @@ from database.crud import (
     get_subjects_by_semester,
     get_subject_by_id,
     get_approved_resources,
+    get_approved_semester_pyqs,
     get_resource_by_id,
     increment_resource_download,
     log_user_event,
@@ -81,9 +82,41 @@ async def access_semester_callback(update: Update, context: ContextTypes.DEFAULT
 
 
 async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle subject selection in access flow - prompt for resource type."""
+    """Handle subject selection in access flow - prompt for resource type or load PYQs directly."""
     query = update.callback_query
     await query.answer()
+
+    if query.data == "access_subj_pyq_all":
+        semester = context.user_data.get("access_semester")
+        if not semester:
+            await query.edit_message_text("Session expired. Please start again with /start.")
+            return
+        back_cb = "main_access"
+        try:
+            with get_db() as db:
+                if update.effective_user:
+                    log_user_event(db, update.effective_user.id, "VIEW_PYQ_ALL", semester)
+                resources = get_approved_semester_pyqs(db, semester)
+        except Exception as e:
+            logger.error(f"Error querying PYQ resources for {semester}: {e}")
+            await query.edit_message_text("⚠️ Database error occurred. Please try again.")
+            return
+
+        if not resources:
+            await query.edit_message_text(
+                text="⚠️ No PYQ resources available for this semester yet.",
+                reply_markup=get_unavailable_keyboard(back_callback=back_cb)
+            )
+            return
+
+        user = update.effective_user
+        is_chief = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
+        header_text = f"📝 {semester} Combined PYQs\n\nClick a button below to download:"
+        await query.edit_message_text(
+            text=header_text,
+            reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=is_chief)
+        )
+        return
 
     try:
         subject_id = int(query.data.replace("access_subj_", ""))

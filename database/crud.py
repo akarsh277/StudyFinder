@@ -47,6 +47,20 @@ def get_approved_resources(db: Session, semester: str, subject_id: int, resource
     )
 
 
+def get_approved_semester_pyqs(db: Session, semester: str) -> List[Resource]:
+    """Retrieve all approved PYQ resources for a specific semester regardless of subject."""
+    return (
+        db.query(Resource)
+        .filter(
+            Resource.semester == semester,
+            Resource.resource_type == "PYQ",
+            Resource.status == "APPROVED"
+        )
+        .order_by(Resource.created_at.desc())
+        .all()
+    )
+
+
 def get_resource_by_id(db: Session, resource_id: int) -> Optional[Resource]:
     """Retrieve resource by ID."""
     return db.query(Resource).filter(Resource.id == resource_id).first()

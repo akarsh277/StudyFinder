@@ -34,12 +34,15 @@ def get_subjects_keyboard(
     prefix: str = "subj",
     back_callback: Optional[str] = None
 ) -> InlineKeyboardMarkup:
-    """Return inline keyboard listing subjects for a semester."""
+    """Return inline keyboard listing subjects for a semester, plus PYQ section button."""
     keyboard = []
     for subject in subjects:
         keyboard.append([
             InlineKeyboardButton(subject.name, callback_data=f"{prefix}_{subject.id}")
         ])
+    keyboard.append([
+        InlineKeyboardButton("📝 PYQs (Combined Question Papers)", callback_data=f"{prefix}_pyq_all")
+    ])
     if back_callback:
         keyboard.append([
             InlineKeyboardButton("🔙 Back", callback_data=back_callback)
