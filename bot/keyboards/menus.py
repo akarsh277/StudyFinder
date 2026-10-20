@@ -71,25 +71,48 @@ def get_resource_types_keyboard(
 def get_resources_download_keyboard(
     resources: List[Resource],
     back_callback: Optional[str] = None,
-    is_chief: bool = False
+    is_chief: bool = False,
+    manage_prefix: str = "access_manage"
 ) -> InlineKeyboardMarkup:
-    """Return keyboard with individual download buttons for available resources."""
+    """Return keyboard with full-width download buttons, plus bottom action row for Chief."""
     keyboard = []
     for res in resources:
         button_text = f"⬇️ {res.title}"
-        if is_chief:
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"download_{res.id}"),
-                InlineKeyboardButton("✏️", callback_data=f"rename_{res.id}"),
-                InlineKeyboardButton("🗑️", callback_data=f"confirm_del_{res.id}")
-            ])
-        else:
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"download_{res.id}")
-            ])
+        keyboard.append([
+            InlineKeyboardButton(button_text, callback_data=f"download_{res.id}")
+        ])
+    if is_chief and resources:
+        keyboard.append([
+            InlineKeyboardButton("✏️ Rename a File", callback_data=f"{manage_prefix}_rename"),
+            InlineKeyboardButton("🗑️ Delete a File", callback_data=f"{manage_prefix}_delete")
+        ])
     if back_callback:
         keyboard.append([
             InlineKeyboardButton("⏪ Back", callback_data=back_callback)
+        ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_resources_manage_keyboard(
+    resources: List[Resource],
+    action: str,
+    back_callback: Optional[str] = None
+) -> InlineKeyboardMarkup:
+    """Return keyboard listing resources full-width for renaming or deleting."""
+    keyboard = []
+    for res in resources:
+        if action == "rename":
+            btn_text = f"✏️ {res.title}"
+            cb = f"rename_{res.id}"
+        else:
+            btn_text = f"🗑️ {res.title}"
+            cb = f"confirm_del_{res.id}"
+        keyboard.append([
+            InlineKeyboardButton(btn_text, callback_data=cb)
+        ])
+    if back_callback:
+        keyboard.append([
+            InlineKeyboardButton("⏪ Cancel", callback_data=back_callback)
         ])
     return InlineKeyboardMarkup(keyboard)
 

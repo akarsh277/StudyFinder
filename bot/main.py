@@ -28,6 +28,8 @@ from bot.handlers.access import (
     access_semester_callback,
     access_subject_callback,
     access_type_callback,
+    access_manage_callback,
+    access_restore_view_callback,
     download_resource_callback,
     back_to_main_callback,
 )
@@ -224,6 +226,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(access_semester_callback, pattern="^access_sem_"))
     application.add_handler(CallbackQueryHandler(access_subject_callback, pattern="^access_subj_"))
     application.add_handler(CallbackQueryHandler(access_type_callback, pattern="^access_type_"))
+    application.add_handler(CallbackQueryHandler(access_manage_callback, pattern="^access_manage_"))
+    application.add_handler(CallbackQueryHandler(access_restore_view_callback, pattern="^access_restore_view$"))
     application.add_handler(CallbackQueryHandler(download_resource_callback, pattern="^download_"))
 
     # Admin Chief review callbacks & commands

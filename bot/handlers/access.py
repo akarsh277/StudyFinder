@@ -19,6 +19,7 @@ from bot.keyboards.menus import (
     get_subjects_keyboard,
     get_resource_types_keyboard,
     get_resources_download_keyboard,
+    get_resources_manage_keyboard,
     get_unavailable_keyboard
 )
 
@@ -91,6 +92,7 @@ async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_
         if not semester:
             await query.edit_message_text("Session expired. Please start again with /start.")
             return
+        context.user_data["access_is_pyq"] = True
         back_cb = "main_access"
         try:
             with get_db() as db:
@@ -148,6 +150,7 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     resource_type = query.data.replace("access_type_", "")
     context.user_data["access_resource_type"] = resource_type
+    context.user_data["access_is_pyq"] = False
 
     semester = context.user_data.get("access_semester")
     subject_id = context.user_data.get("access_subject_id")
@@ -182,6 +185,88 @@ async def access_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     is_chief = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
 
+    await query.edit_message_text(
+        text=header_text,
+        reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=is_chief)
+    )
+
+
+async def access_manage_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Chief clicking '✏️ Rename a File' or '🗑️ Delete a File' at the bottom of the list."""
+    query = update.callback_query
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        await query.answer("⛔ Unauthorized", show_alert=True)
+        return
+
+    await query.answer()
+    action = "rename" if "rename" in query.data else "delete"
+
+    semester = context.user_data.get("access_semester")
+    is_pyq = context.user_data.get("access_is_pyq", False)
+    subject_id = context.user_data.get("access_subject_id")
+    resource_type = context.user_data.get("access_resource_type")
+
+    try:
+        with get_db() as db:
+            if is_pyq:
+                resources = get_approved_semester_pyqs(db, semester)
+            else:
+                resources = get_approved_resources(db, semester, subject_id, resource_type)
+    except Exception as e:
+        logger.error(f"Error querying resources in access_manage_callback: {e}")
+        await query.edit_message_text("⚠️ Database error occurred.")
+        return
+
+    if not resources:
+        await query.edit_message_text("⚠️ No resources available to manage.")
+        return
+
+    action_label = "rename" if action == "rename" else "delete"
+    action_icon = "✏️" if action == "rename" else "🗑️"
+    prompt_text = f"{action_icon} Select a file to {action_label}:"
+
+    await query.edit_message_text(
+        text=prompt_text,
+        reply_markup=get_resources_manage_keyboard(resources, action=action, back_callback="access_restore_view")
+    )
+
+
+async def access_restore_view_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Restore normal download view when cancelling rename/delete selection."""
+    query = update.callback_query
+    await query.answer()
+
+    semester = context.user_data.get("access_semester")
+    is_pyq = context.user_data.get("access_is_pyq", False)
+    subject_id = context.user_data.get("access_subject_id")
+    resource_type = context.user_data.get("access_resource_type")
+
+    if not semester:
+        await query.edit_message_text("Session expired. Please restart with /start.")
+        return
+
+    try:
+        with get_db() as db:
+            if is_pyq:
+                back_cb = "main_access"
+                resources = get_approved_semester_pyqs(db, semester)
+                header_text = f"📝 {semester} PYQ Papers\n\nClick a button below to download:"
+            else:
+                back_cb = f"access_subj_{subject_id}" if subject_id else "main_access"
+                subject = get_subject_by_id(db, subject_id) if subject_id else None
+                subject_name = subject.name if subject else "Selected Subject"
+                resources = get_approved_resources(db, semester, subject_id, resource_type)
+                type_icon_map = {"NOTES": "📒", "PYQ": "📝", "ASSIGNMENT": "📋"}
+                icon = type_icon_map.get(resource_type, "📚")
+                header_text = f"{icon} {subject_name} {resource_type.capitalize()}\n\nClick a button below to download the resource:"
+    except Exception as e:
+        logger.error(f"Error restoring view in access_restore_view_callback: {e}")
+        await query.edit_message_text("⚠️ Database error occurred.")
+        return
+
+    user = update.effective_user
+    is_chief = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
     await query.edit_message_text(
         text=header_text,
         reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=is_chief)
