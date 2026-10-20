@@ -9,7 +9,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update
+from telegram import Update, BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     ApplicationBuilder,
@@ -20,7 +20,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from config import BOT_TOKEN
+from config import BOT_TOKEN, CHIEF_TELEGRAM_ID
 from init_db import init_db
 from bot.handlers.start import start_handler
 from bot.handlers.access import (
@@ -49,6 +49,9 @@ from bot.handlers.admin import (
     delete_type_callback,
     confirm_delete_callback,
     execute_delete_callback,
+    rename_start_callback,
+    rename_title_handler,
+    cancel_rename_callback,
 )
 from bot.handlers.analytics import analytics_handler
 from bot.states.conversation import (
@@ -57,6 +60,7 @@ from bot.states.conversation import (
     SELECT_TYPE,
     ENTER_TITLE,
     UPLOAD_FILE,
+    RENAME_TITLE,
 )
 
 # Configure logging
@@ -103,6 +107,33 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
             pass
 
 
+async def setup_bot_commands(application) -> None:
+    """Register menu commands with Telegram so users see the command menu button."""
+    try:
+        student_commands = [
+            BotCommand("start", "Open main menu"),
+            BotCommand("upload", "Upload a study resource"),
+            BotCommand("cancel", "Cancel current action"),
+        ]
+        await application.bot.set_my_commands(student_commands, scope=BotCommandScopeDefault())
+
+        if CHIEF_TELEGRAM_ID and CHIEF_TELEGRAM_ID != 0:
+            chief_commands = [
+                BotCommand("start", "Open main menu"),
+                BotCommand("upload", "Upload a study resource"),
+                BotCommand("delete", "Manage, rename & delete resources"),
+                BotCommand("analytics", "View 30-day analytics & stats"),
+                BotCommand("cancel", "Cancel current action"),
+            ]
+            await application.bot.set_my_commands(
+                chief_commands,
+                scope=BotCommandScopeChat(chat_id=CHIEF_TELEGRAM_ID)
+            )
+        logger.info("Bot commands menu registered successfully.")
+    except Exception as e:
+        logger.warning(f"Could not register bot commands with Telegram: {e}")
+
+
 def main() -> None:
     """Initialize database and start the Telegram bot using polling."""
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
@@ -128,6 +159,7 @@ def main() -> None:
         .token(BOT_TOKEN)
         .request(request)
         .get_updates_request(request)
+        .post_init(setup_bot_commands)
         .build()
     )
 
@@ -162,9 +194,29 @@ def main() -> None:
         per_chat=True,
     )
 
+    # Rename ConversationHandler (Chief only)
+    rename_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(rename_start_callback, pattern="^rename_"),
+        ],
+        states={
+            RENAME_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, rename_title_handler)
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_rename_callback, pattern="^cancel_rename$"),
+            CommandHandler("cancel", cancel_rename_callback),
+            CommandHandler("start", start_handler),
+        ],
+        per_user=True,
+        per_chat=True,
+    )
+
     # Register handlers
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(upload_conv_handler)
+    application.add_handler(rename_conv_handler)
 
     # Access Resources & Navigation callbacks
     application.add_handler(CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"))

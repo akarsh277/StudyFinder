@@ -1,16 +1,19 @@
 import logging
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import (
     get_resource_by_id,
     update_resource_status,
+    update_resource_title,
     delete_resource,
     get_subjects_by_semester,
     get_subject_by_id,
     get_approved_resources,
+    get_approved_semester_pyqs,
 )
+from bot.states.conversation import RENAME_TITLE
 from bot.keyboards.menus import (
     get_semester_keyboard,
     get_subjects_keyboard,
@@ -206,6 +209,35 @@ async def delete_subject_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
     await query.answer()
+
+    if query.data == "delete_subj_pyq_all":
+        semester = context.user_data.get("delete_semester")
+        if not semester:
+            await query.edit_message_text("Session expired. Please start again with /delete.")
+            return
+        back_cb = f"delete_sem_{semester}"
+        try:
+            with get_db() as db:
+                resources = get_approved_semester_pyqs(db, semester)
+        except Exception as e:
+            logger.error(f"Error querying PYQ resources for delete flow: {e}")
+            await query.edit_message_text("⚠️ Database error occurred.")
+            return
+
+        if not resources:
+            await query.edit_message_text(
+                text="⚠️ No PYQ resources available in this section.",
+                reply_markup=get_unavailable_keyboard(back_callback=back_cb)
+            )
+            return
+
+        header_text = f"Manage {semester} PYQ Papers:\n\nClick 🗑️ to delete or ✏️ to rename:"
+        await query.edit_message_text(
+            text=header_text,
+            reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=True)
+        )
+        return
+
     try:
         subject_id = int(query.data.replace("delete_subj_", ""))
         context.user_data["delete_subject_id"] = subject_id
@@ -259,7 +291,7 @@ async def delete_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    header_text = f"Delete Resources in {subject_name} {resource_type.capitalize()}:\n\nClick ' Delete' next to a resource to remove it:"
+    header_text = f"Manage Resources in {subject_name} {resource_type.capitalize()}:\n\nClick 🗑️ to delete or ✏️ to rename:"
     await query.edit_message_text(
         text=header_text,
         reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=True)
@@ -337,7 +369,106 @@ async def execute_delete_callback(update: Update, context: ContextTypes.DEFAULT_
 
     if success:
         await query.answer("Resource deleted successfully.")
-        await query.edit_message_text(text=f"✅ Resource '{title}' has been deleted successfully.")
+        await query.edit_message_text(
+            text=f"✅ Resource '{title}' has been deleted successfully.\n\nType /start to return to the main menu."
+        )
     else:
         await query.answer("Resource not found or already deleted.")
-        await query.edit_message_text(text="⚠️ Resource was already deleted or not found.")
+        await query.edit_message_text(
+            text="⚠️ Resource was already deleted or not found.\n\nType /start to return to the main menu."
+        )
+
+
+async def rename_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle Chief clicking ✏️ to rename a resource."""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        await query.answer("⛔ Unauthorized: Only Chief can rename resources.", show_alert=True)
+        return ConversationHandler.END
+
+    await query.answer()
+
+    try:
+        resource_id = int(query.data.replace("rename_", ""))
+    except ValueError:
+        await query.answer("Invalid resource ID.", show_alert=True)
+        return ConversationHandler.END
+
+    try:
+        with get_db() as db:
+            resource = get_resource_by_id(db, resource_id)
+            if not resource:
+                await query.edit_message_text("⚠️ Resource not found.")
+                return ConversationHandler.END
+            current_title = resource.title
+    except Exception as e:
+        logger.error(f"Error loading resource {resource_id} for rename: {e}")
+        await query.edit_message_text("⚠️ Database error occurred.")
+        return ConversationHandler.END
+
+    context.user_data["rename_resource_id"] = resource_id
+
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_rename")]
+    ])
+
+    await query.edit_message_text(
+        text=(
+            f"✏️ Rename Resource\n\n"
+            f"Current title: {current_title}\n\n"
+            f"Please enter the new title for this resource in text:"
+        ),
+        reply_markup=cancel_markup
+    )
+    return RENAME_TITLE
+
+
+async def rename_title_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle entry of new title for the resource."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        return ConversationHandler.END
+
+    new_title = update.message.text.strip()
+    if not new_title:
+        await update.message.reply_text("Title cannot be empty. Please enter a valid title:")
+        return RENAME_TITLE
+
+    resource_id = context.user_data.get("rename_resource_id")
+    if not resource_id:
+        await update.message.reply_text("Session expired. Please start again with /start.")
+        return ConversationHandler.END
+
+    try:
+        with get_db() as db:
+            updated = update_resource_title(db, resource_id, new_title)
+            if not updated:
+                await update.message.reply_text("⚠️ Resource not found or already deleted.")
+                return ConversationHandler.END
+    except Exception as e:
+        logger.error(f"Error updating title for resource {resource_id}: {e}")
+        await update.message.reply_text("⚠️ Database error occurred while renaming.")
+        return ConversationHandler.END
+
+    context.user_data.pop("rename_resource_id", None)
+    await update.message.reply_text(
+        f"✅ Resource renamed successfully to:\n\"{new_title}\"\n\nType /start to return to the main menu."
+    )
+    return ConversationHandler.END
+
+
+async def cancel_rename_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancelling resource rename."""
+    context.user_data.pop("rename_resource_id", None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "Rename cancelled.\n\nType /start to return to the main menu."
+        )
+    elif update.message:
+        await update.message.reply_text(
+            "Rename cancelled.\n\nType /start to return to the main menu."
+        )
+    return ConversationHandler.END

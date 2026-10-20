@@ -24,7 +24,7 @@ def get_semester_keyboard(prefix: str = "sem", back_callback: Optional[str] = "b
     ]
     if back_callback:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back to Main Menu", callback_data=back_callback)
+            InlineKeyboardButton("⏪ Back to Main Menu", callback_data=back_callback)
         ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -41,11 +41,11 @@ def get_subjects_keyboard(
             InlineKeyboardButton(subject.name, callback_data=f"{prefix}_{subject.id}")
         ])
     keyboard.append([
-        InlineKeyboardButton("📝 PYQs (Combined Question Papers)", callback_data=f"{prefix}_pyq_all")
+        InlineKeyboardButton("📝 PYQ Papers", callback_data=f"{prefix}_pyq_all")
     ])
     if back_callback:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back", callback_data=back_callback)
+            InlineKeyboardButton("⏪ Back", callback_data=back_callback)
         ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -54,17 +54,16 @@ def get_resource_types_keyboard(
     prefix: str = "type",
     back_callback: Optional[str] = None
 ) -> InlineKeyboardMarkup:
-    """Return resource type selection keyboard."""
+    """Return resource type selection keyboard without PYQ (available at semester level)."""
     keyboard = [
         [
             InlineKeyboardButton("📒 Notes", callback_data=f"{prefix}_NOTES"),
-            InlineKeyboardButton("📝 PYQs", callback_data=f"{prefix}_PYQ"),
             InlineKeyboardButton("📋 Assignments", callback_data=f"{prefix}_ASSIGNMENT"),
         ]
     ]
     if back_callback:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back", callback_data=back_callback)
+            InlineKeyboardButton("⏪ Back", callback_data=back_callback)
         ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -81,7 +80,8 @@ def get_resources_download_keyboard(
         if is_chief:
             keyboard.append([
                 InlineKeyboardButton(button_text, callback_data=f"download_{res.id}"),
-                InlineKeyboardButton("🗑️ Delete", callback_data=f"confirm_del_{res.id}")
+                InlineKeyboardButton("✏️", callback_data=f"rename_{res.id}"),
+                InlineKeyboardButton("🗑️", callback_data=f"confirm_del_{res.id}")
             ])
         else:
             keyboard.append([
@@ -89,7 +89,7 @@ def get_resources_download_keyboard(
             ])
     if back_callback:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back", callback_data=back_callback)
+            InlineKeyboardButton("⏪ Back", callback_data=back_callback)
         ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -114,11 +114,11 @@ def get_unavailable_keyboard(back_callback: Optional[str] = None) -> InlineKeybo
     ]
     if back_callback:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back", callback_data=back_callback)
+            InlineKeyboardButton("⏪ Back", callback_data=back_callback)
         ])
     else:
         keyboard.append([
-            InlineKeyboardButton("🔙 Back to Main Menu", callback_data="back_to_main")
+            InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")
         ])
     return InlineKeyboardMarkup(keyboard)
 

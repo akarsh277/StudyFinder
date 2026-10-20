@@ -8,7 +8,6 @@ from bot.keyboards.menus import (
     get_semester_keyboard,
     get_subjects_keyboard,
     get_resource_types_keyboard,
-    get_admin_review_keyboard
 )
 from bot.states.conversation import (
     SELECT_SEMESTER,
@@ -83,7 +82,7 @@ async def upload_subject_callback(update: Update, context: ContextTypes.DEFAULT_
         except Exception:
             context.user_data["upload_subject_id"] = 1
 
-        await query.edit_message_text(text="📝 Enter the title for the PYQ paper(s).\n\nExample: Combined PYQs 2022-2024")
+        await query.edit_message_text(text="📝 Enter the title for the PYQ paper(s).\n\nExample: PYQ Papers 2022-2024")
         return ENTER_TITLE
 
     try:
@@ -167,6 +166,10 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             subject = get_subject_by_id(db, subject_id)
             subject_name = subject.name if subject else "Unknown Subject"
 
+            # Check if uploader is Admin / Chief (auto-approved, no approval required)
+            is_admin = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
+            status = "APPROVED" if is_admin else "PENDING"
+
             new_resource = create_resource(
                 db=db,
                 title=title,
@@ -176,7 +179,7 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 file_id=doc.file_id,
                 file_name=file_name,
                 uploaded_by=user.id,
-                status="PENDING"
+                status=status
             )
             resource_id = new_resource.id
     except Exception as e:
@@ -184,36 +187,11 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⚠️ Failed to submit resource due to database error. Please try again.")
         return ConversationHandler.END
 
-    # Success response to student
+    # Success completion message in text
     await update.message.reply_text(
-        "✅ Resource submitted successfully.\n\n"
-        "Your resource has been sent to the Chief for approval."
+        "✅ Resource uploaded successfully!\n\n"
+        "Type /start to return to the main menu."
     )
-
-    # Notify Chief if CHIEF_TELEGRAM_ID is configured
-    if CHIEF_TELEGRAM_ID and CHIEF_TELEGRAM_ID != 0:
-        student_username = f"@{user.username}" if user.username else f"User {user.id}"
-        type_display = resource_type.capitalize()
-
-        chief_text = (
-            f"📥 New Resource Submission\n\n"
-            f"Title: {title}\n"
-            f"Semester: {semester}\n"
-            f"Subject: {subject_name}\n"
-            f"Type: {type_display}\n"
-            f"Submitted by: {student_username}"
-        )
-
-        try:
-            # Send uploaded document directly to Chief with review buttons
-            await context.bot.send_document(
-                chat_id=CHIEF_TELEGRAM_ID,
-                document=doc.file_id,
-                caption=chief_text,
-                reply_markup=get_admin_review_keyboard(resource_id)
-            )
-        except Exception as e:
-            logger.error(f"Error notifying Chief {CHIEF_TELEGRAM_ID}: {e}")
 
     # Clear upload state
     context.user_data.pop("upload_title", None)

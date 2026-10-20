@@ -111,7 +111,7 @@ async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_
 
         user = update.effective_user
         is_chief = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)
-        header_text = f"📝 {semester} Combined PYQs\n\nClick a button below to download:"
+        header_text = f"📝 {semester} PYQ Papers\n\nClick a button below to download:"
         await query.edit_message_text(
             text=header_text,
             reply_markup=get_resources_download_keyboard(resources, back_callback=back_cb, is_chief=is_chief)
@@ -226,6 +226,12 @@ async def download_resource_callback(update: Update, context: ContextTypes.DEFAU
                     log_user_event(db, update.effective_user.id, "DOWNLOAD", str(resource_id))
         except Exception as ex:
             logger.error(f"Error incrementing download count for resource {resource_id}: {ex}")
+
+        # Completion text message prompting start
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Type /start to return to the main menu."
+        )
     except Exception as e:
         logger.error(f"Error sending document {file_id}: {e}")
         await query.message.reply_text("⚠️ Failed to send document. The file may have expired on Telegram.")

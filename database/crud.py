@@ -114,6 +114,16 @@ def update_resource_status(db: Session, resource_id: int, new_status: str) -> Op
     return resource
 
 
+def update_resource_title(db: Session, resource_id: int, new_title: str) -> Optional[Resource]:
+    """Update title of a resource in DB."""
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    if resource:
+        resource.title = new_title
+        db.commit()
+        db.refresh(resource)
+    return resource
+
+
 def seed_initial_subjects(db: Session) -> None:
     """Seed initial subjects for CSE 2-2 and CSE 3-1 if not already present."""
     initial_data = [
