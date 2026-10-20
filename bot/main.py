@@ -115,7 +115,6 @@ async def setup_bot_commands(application) -> None:
         student_commands = [
             BotCommand("start", "Open main menu"),
             BotCommand("upload", "Upload a study resource"),
-            BotCommand("cancel", "Cancel current action"),
         ]
         await application.bot.set_my_commands(student_commands, scope=BotCommandScopeDefault())
 
@@ -123,9 +122,7 @@ async def setup_bot_commands(application) -> None:
             chief_commands = [
                 BotCommand("start", "Open main menu"),
                 BotCommand("upload", "Upload a study resource"),
-                BotCommand("delete", "Manage, rename & delete resources"),
-                BotCommand("analytics", "View 30-day analytics & stats"),
-                BotCommand("cancel", "Cancel current action"),
+                BotCommand("delete", "Manage, rename & delete resources (Chief)"),
             ]
             await application.bot.set_my_commands(
                 chief_commands,
@@ -231,7 +228,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(download_resource_callback, pattern="^download_"))
 
     # Admin Chief review callbacks & commands
-    application.add_handler(CommandHandler("analytics", analytics_handler))
+    application.add_handler(CommandHandler(["stats", "analytics"], analytics_handler))
     application.add_handler(CommandHandler("delete", delete_command_handler))
     application.add_handler(CallbackQueryHandler(approve_resource_callback, pattern="^approve_"))
     application.add_handler(CallbackQueryHandler(reject_resource_callback, pattern="^reject_"))
