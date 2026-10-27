@@ -19,6 +19,7 @@ from database.crud import (
     create_branch,
     get_branch_by_name,
     add_semester_to_branch,
+    check_duplicate_resource,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -82,6 +83,18 @@ async def upload_local_file(
 
         subject_id = subject.id
         subject_official_name = subject.name
+
+        # Check if resource with same title or filename already exists in DB
+        dup = check_duplicate_resource(
+            db=db,
+            semester=semester,
+            subject_id=subject_id,
+            title=title,
+            file_name=file_name
+        )
+        if dup:
+            print(f"⚠️ Skipped: File '{file_name}' / Title '{title}' already exists for {semester} -> {subject_official_name}.", flush=True)
+            return
 
         # Determine target chat ID to send document to on Telegram
         latest_user = db.query(User).order_by(User.id.desc()).first()

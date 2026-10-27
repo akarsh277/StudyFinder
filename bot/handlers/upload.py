@@ -9,6 +9,7 @@ from database.crud import (
     get_subjects_by_semester,
     get_subject_by_id,
     create_resource,
+    check_duplicate_resource,
 )
 from bot.keyboards.menus import (
     get_branches_keyboard,
@@ -35,6 +36,10 @@ async def upload_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if query:
         await query.answer()
 
+    # Clear previous upload keys so the session starts fresh
+    for k in ["upload_branch", "upload_semester", "upload_subject_id", "upload_resource_type", "upload_title"]:
+        context.user_data.pop(k, None)
+
     try:
         with get_db() as db:
             branches = get_all_branches(db)
@@ -51,10 +56,22 @@ async def upload_start_callback(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup = get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
         state_to_return = SELECT_SEMESTER
 
-    if query:
-        await query.edit_message_text(text=text_msg, reply_markup=reply_markup)
-    elif update.message:
-        await update.message.reply_text(text=text_msg, reply_markup=reply_markup)
+    try:
+        if query:
+            await query.edit_message_text(text=text_msg, reply_markup=reply_markup)
+        elif update.message:
+            await update.message.reply_text(text=text_msg, reply_markup=reply_markup)
+    except Exception as e:
+        if "Message is not modified" in str(e):
+            pass
+        else:
+            logger.warning(f"Could not edit message in upload_start_callback: {e}, sending new message")
+            if update.effective_chat:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=text_msg,
+                    reply_markup=reply_markup
+                )
     return state_to_return
 
 
@@ -167,33 +184,77 @@ async def upload_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     resource_type = query.data.replace("upload_type_", "")
     context.user_data["upload_resource_type"] = resource_type
 
-    await query.edit_message_text(text="📝 Enter the resource title.\n\nExample: DBMS Unit 3 Notes")
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+    ])
+    await query.edit_message_text(
+        text="📝 Enter the resource title.\n\nExample: DBMS Unit 3 Notes",
+        reply_markup=cancel_markup
+    )
     return ENTER_TITLE
 
 
 async def upload_title_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle title entry - prompt user to upload document file."""
+    """Handle title entry - validate title, check for duplicates, and prompt user to upload document file."""
     title = update.message.text.strip()
     if not title:
         await update.message.reply_text("Title cannot be empty. Please enter a valid resource title.")
         return ENTER_TITLE
 
+    semester = context.user_data.get("upload_semester")
+    subject_id = context.user_data.get("upload_subject_id")
+
+    # Check for duplicate resource title in DB
+    if semester and subject_id:
+        try:
+            with get_db() as db:
+                duplicate = check_duplicate_resource(
+                    db=db,
+                    semester=semester,
+                    subject_id=subject_id,
+                    title=title
+                )
+                if duplicate:
+                    subject = get_subject_by_id(db, subject_id)
+                    subj_name = subject.name if subject else "this subject"
+                    cancel_markup = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+                    ])
+                    await update.message.reply_text(
+                        f"⚠️ A resource with the title *'{title}'* already exists for {subj_name} ({semester}).\n\n"
+                        f"Please enter a different or more specific title to avoid duplicates:\n"
+                        f"(e.g., *{title} (Part 2)* or *{title} - 2026*):",
+                        reply_markup=cancel_markup,
+                        parse_mode="Markdown"
+                    )
+                    return ENTER_TITLE
+        except Exception as e:
+            logger.warning(f"Error checking duplicate title: {e}")
+
     context.user_data["upload_title"] = title
 
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+    ])
     await update.message.reply_text(
-        "Please upload the resource document (.pdf, .doc, or .docx file)."
+        "Please upload the resource document (.pdf, .doc, or .docx file).",
+        reply_markup=cancel_markup
     )
     return UPLOAD_FILE
 
 
 async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle file upload, validate PDF/DOC/DOCX, save to DB with PENDING status, and notify Chief."""
+    """Handle file upload, validate PDF/DOC/DOCX, check duplicates, save to DB with PENDING status, and notify Chief."""
     user = update.effective_user
     doc = update.message.document
 
     if not doc:
+        cancel_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+        ])
         await update.message.reply_text(
-            "⚠️ Unsupported file or content. Please upload a valid document (.pdf, .doc, .docx)."
+            "⚠️ Unsupported file or content. Please upload a valid document (.pdf, .doc, .docx).",
+            reply_markup=cancel_markup
         )
         return UPLOAD_FILE
 
@@ -204,8 +265,12 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     allowed_mimes = ("pdf", "msword", "wordprocessingml")
 
     if not (any(file_name.endswith(ext) for ext in allowed_exts) or any(m in mime_type for m in allowed_mimes)):
+        cancel_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+        ])
         await update.message.reply_text(
-            "⚠️ Unsupported file type. Please upload a PDF, DOC, or DOCX document (.pdf, .doc, .docx)."
+            "⚠️ Unsupported file type. Please upload a PDF, DOC, or DOCX document (.pdf, .doc, .docx).",
+            reply_markup=cancel_markup
         )
         return UPLOAD_FILE
 
@@ -222,6 +287,26 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         with get_db() as db:
             subject = get_subject_by_id(db, subject_id)
             subject_name = subject.name if subject else "Unknown Subject"
+
+            # Check if file name or title already exists in DB for this subject & semester
+            duplicate = check_duplicate_resource(
+                db=db,
+                semester=semester,
+                subject_id=subject_id,
+                title=title,
+                file_name=file_name
+            )
+            if duplicate:
+                cancel_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏪ Back to Main Menu", callback_data="back_to_main")]
+                ])
+                await update.message.reply_text(
+                    f"⚠️ A file named *'{doc.file_name or file_name}'* (or title *'{duplicate.title}'*) already exists for {subject_name} ({semester}).\n\n"
+                    f"Please rename the file on your device and upload it again, or choose a different document:",
+                    reply_markup=cancel_markup,
+                    parse_mode="Markdown"
+                )
+                return UPLOAD_FILE
 
             # Check if uploader is Admin / Chief (auto-approved, no approval required)
             is_admin = bool(user and CHIEF_TELEGRAM_ID != 0 and user.id == CHIEF_TELEGRAM_ID)

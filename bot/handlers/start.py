@@ -1,6 +1,6 @@
 import logging
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import get_or_create_user, log_user_event
@@ -13,11 +13,11 @@ Notes ledha,
 Digulu endhuku Dhandaga nenu unna neeku Andagaa 🫶🏻"""
 
 
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /start command with exact specified text and main menu keyboard."""
     user = update.effective_user
     if not user:
-        return
+        return ConversationHandler.END
 
     role = "CHIEF" if user.id == CHIEF_TELEGRAM_ID else "STUDENT"
 
@@ -28,6 +28,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception as e:
         logger.error(f"Error registering user in start_handler: {e}")
 
+    # Clear user session data so state is fresh
+    context.user_data.clear()
+
     reply_markup = get_main_menu_keyboard()
 
     if update.message:
@@ -37,7 +40,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     elif update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            text=START_MESSAGE,
-            reply_markup=reply_markup
-        )
+        try:
+            await update.callback_query.edit_message_text(
+                text=START_MESSAGE,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            if "Message is not modified" not in str(e):
+                logger.warning(f"Error editing message in start_handler: {e}")
+
+    return ConversationHandler.END

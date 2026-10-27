@@ -2,7 +2,7 @@ import logging
 # pyrefly: ignore [missing-import]
 from telegram import Update
 # pyrefly: ignore [missing-import]
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import (
@@ -30,17 +30,23 @@ from bot.keyboards.menus import (
 logger = logging.getLogger(__name__)
 
 
-async def back_to_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle returning to main menu."""
+async def back_to_main_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle returning to main menu and cleanly terminate any active conversation."""
     query = update.callback_query
     if query:
         await query.answer()
+        context.user_data.clear()
         from bot.handlers.start import START_MESSAGE
         from bot.keyboards.menus import get_main_menu_keyboard
-        await query.edit_message_text(
-            text=START_MESSAGE,
-            reply_markup=get_main_menu_keyboard()
-        )
+        try:
+            await query.edit_message_text(
+                text=START_MESSAGE,
+                reply_markup=get_main_menu_keyboard()
+            )
+        except Exception as e:
+            if "Message is not modified" not in str(e):
+                logger.warning(f"Error editing message in back_to_main: {e}")
+    return ConversationHandler.END
 
 
 async def access_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

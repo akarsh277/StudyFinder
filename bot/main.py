@@ -213,27 +213,41 @@ def main() -> None:
         ],
         states={
             SELECT_BRANCH: [
-                CallbackQueryHandler(upload_branch_callback, pattern="^upload_branch_")
+                CallbackQueryHandler(upload_branch_callback, pattern="^upload_branch_"),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
             SELECT_SEMESTER: [
-                CallbackQueryHandler(upload_semester_callback, pattern="^upload_sem_")
+                CallbackQueryHandler(upload_semester_callback, pattern="^upload_sem_"),
+                CallbackQueryHandler(upload_start_callback, pattern="^main_upload$"),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
             SELECT_SUBJECT: [
-                CallbackQueryHandler(upload_subject_callback, pattern="^upload_subj_")
+                CallbackQueryHandler(upload_subject_callback, pattern="^upload_subj_"),
+                CallbackQueryHandler(upload_branch_callback, pattern="^upload_branch_"),
+                CallbackQueryHandler(upload_start_callback, pattern="^main_upload$"),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
             SELECT_TYPE: [
-                CallbackQueryHandler(upload_type_callback, pattern="^upload_type_")
+                CallbackQueryHandler(upload_type_callback, pattern="^upload_type_"),
+                CallbackQueryHandler(upload_semester_callback, pattern="^upload_sem_"),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
             ENTER_TITLE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, upload_title_handler)
+                MessageHandler(filters.TEXT & ~filters.COMMAND, upload_title_handler),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
             UPLOAD_FILE: [
-                MessageHandler(filters.ALL & ~filters.COMMAND, upload_file_handler)
+                MessageHandler(filters.ALL & ~filters.COMMAND, upload_file_handler),
+                CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
             ],
         },
         fallbacks=[
             CommandHandler("start", start_handler),
+            CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"),
+            CallbackQueryHandler(upload_start_callback, pattern="^(main_upload|start_upload_flow)$"),
+            CommandHandler("upload", upload_start_callback),
         ],
+        allow_reentry=True,
         per_user=True,
         per_chat=True,
     )
@@ -252,6 +266,7 @@ def main() -> None:
             CallbackQueryHandler(cancel_rename_callback, pattern="^cancel_rename$"),
             CommandHandler("start", start_handler),
         ],
+        allow_reentry=True,
         per_user=True,
         per_chat=True,
     )
@@ -271,6 +286,7 @@ def main() -> None:
             CallbackQueryHandler(cancel_add_branch_handler, pattern="^cancel_add_branch$"),
             CommandHandler("start", start_handler),
         ],
+        allow_reentry=True,
         per_user=True,
         per_chat=True,
     )
@@ -293,6 +309,7 @@ def main() -> None:
             CallbackQueryHandler(cancel_add_sem_handler, pattern="^cancel_add_sem$"),
             CommandHandler("start", start_handler),
         ],
+        allow_reentry=True,
         per_user=True,
         per_chat=True,
     )
@@ -318,6 +335,7 @@ def main() -> None:
             CallbackQueryHandler(cancel_add_subj_handler, pattern="^cancel_add_subj$"),
             CommandHandler("start", start_handler),
         ],
+        allow_reentry=True,
         per_user=True,
         per_chat=True,
     )

@@ -1,8 +1,9 @@
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from database.models import User, Branch, Subject, Resource, UserEvent
 
@@ -75,6 +76,41 @@ def delete_resource(db: Session, resource_id: int) -> bool:
         db.commit()
         return True
     return False
+
+
+def check_duplicate_resource(
+    db: Session,
+    semester: str,
+    subject_id: int,
+    title: Optional[str] = None,
+    file_name: Optional[str] = None
+) -> Optional[Resource]:
+    """
+    Check if an active (APPROVED or PENDING) resource already exists
+    with the same title or same file_name for the given subject and semester.
+    """
+    query = db.query(Resource).filter(
+        Resource.semester == semester,
+        Resource.subject_id == subject_id,
+        Resource.status.in_(["APPROVED", "PENDING"])
+    )
+
+    conditions = []
+    if title and title.strip():
+        clean_title = title.strip().lower()
+        conditions.append(func.lower(Resource.title) == clean_title)
+    if file_name and file_name.strip():
+        clean_file = file_name.strip().lower()
+        conditions.append(func.lower(Resource.file_name) == clean_file)
+        # Also check if title matches filename without extension
+        base_name = os.path.splitext(clean_file)[0]
+        conditions.append(func.lower(Resource.title) == base_name)
+
+    if conditions:
+        query = query.filter(or_(*conditions))
+        return query.first()
+
+    return None
 
 
 def create_resource(
