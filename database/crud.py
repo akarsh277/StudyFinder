@@ -1,9 +1,10 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from database.models import User, Subject, Resource, UserEvent
+from database.models import User, Branch, Subject, Resource, UserEvent
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,41 @@ def update_resource_title(db: Session, resource_id: int, new_title: str) -> Opti
     return resource
 
 
+def get_all_branches(db: Session) -> List[Branch]:
+    """Retrieve all available branches ordered by id."""
+    return db.query(Branch).order_by(Branch.id).all()
+
+
+def get_branch_by_name(db: Session, name: str) -> Optional[Branch]:
+    """Retrieve branch by name (case-insensitive)."""
+    return db.query(Branch).filter(func.lower(Branch.name) == name.strip().lower()).first()
+
+
+def create_branch(db: Session, name: str, semesters: str = "2-2,3-1") -> Branch:
+    """Create a new engineering branch."""
+    clean_name = name.strip()
+    branch = Branch(name=clean_name, semesters=semesters.strip())
+    db.add(branch)
+    db.commit()
+    db.refresh(branch)
+    return branch
+
+
+def seed_initial_branches(db: Session) -> None:
+    """Seed initial branches CSE and CSE(AI) if not present."""
+    default_branches = [
+        {"name": "CSE", "semesters": "2-2,3-1"},
+        {"name": "CSE(AI)", "semesters": "2-2,3-1"},
+    ]
+    for b in default_branches:
+        existing = db.query(Branch).filter(Branch.name == b["name"]).first()
+        if not existing:
+            db.add(Branch(name=b["name"], semesters=b["semesters"]))
+    db.commit()
+
+
 def seed_initial_subjects(db: Session) -> None:
-    """Seed initial subjects for CSE 2-2 and CSE 3-1 if not already present."""
+    """Seed initial subjects for CSE 2-2, CSE 3-1, and CSE(AI) 3-1 if not already present."""
     initial_data = [
         # CSE 2-2
         {"name": "MEFA", "semester": "CSE 2-2"},
@@ -138,6 +172,8 @@ def seed_initial_subjects(db: Session) -> None:
         {"name": "FLAT", "semester": "CSE 3-1"},
         {"name": "CN", "semester": "CSE 3-1"},
         {"name": "EPS", "semester": "CSE 3-1"},
+        # CSE(AI) 3-1
+        {"name": "OS", "semester": "CSE(AI) 3-1"},
     ]
 
     for item in initial_data:
@@ -149,6 +185,90 @@ def seed_initial_subjects(db: Session) -> None:
         if not existing:
             db.add(Subject(name=item["name"], semester=item["semester"]))
     db.commit()
+
+
+def copy_os_resources_to_cse_ai(db: Session) -> int:
+    """Copy all existing OS resources from CSE 2-2 to CSE(AI) 3-1."""
+    # Ensure target subject exists
+    target_subject = (
+        db.query(Subject)
+        .filter(Subject.name == "OS", Subject.semester == "CSE(AI) 3-1")
+        .first()
+    )
+    if not target_subject:
+        target_subject = Subject(name="OS", semester="CSE(AI) 3-1")
+        db.add(target_subject)
+        db.commit()
+        db.refresh(target_subject)
+
+    source_subject = (
+        db.query(Subject)
+        .filter(Subject.name == "OS", Subject.semester == "CSE 2-2")
+        .first()
+    )
+    if not source_subject:
+        return 0
+
+    source_resources = (
+        db.query(Resource)
+        .filter(Resource.subject_id == source_subject.id, Resource.status == "APPROVED")
+        .all()
+    )
+
+    copied_count = 0
+    for res in source_resources:
+        already_exists = (
+            db.query(Resource)
+            .filter(
+                Resource.semester == "CSE(AI) 3-1",
+                Resource.subject_id == target_subject.id,
+                Resource.title == res.title,
+                Resource.file_id == res.file_id,
+            )
+            .first()
+        )
+        if not already_exists:
+            new_res = Resource(
+                title=res.title,
+                semester="CSE(AI) 3-1",
+                subject_id=target_subject.id,
+                resource_type=res.resource_type,
+                file_id=res.file_id,
+                file_name=res.file_name,
+                uploaded_by=res.uploaded_by,
+                status="APPROVED",
+                download_count=0,
+                created_at=datetime.utcnow(),
+            )
+            db.add(new_res)
+            copied_count += 1
+
+    if copied_count > 0:
+        db.commit()
+        logger.info(f"Copied {copied_count} OS resources to CSE(AI) 3-1")
+    return copied_count
+
+
+def get_resources_uploaded_today(db: Session) -> List[Resource]:
+    """Retrieve all approved resources created today in IST timezone."""
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    start_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=ist)
+    end_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 23, 59, 59, tzinfo=ist)
+    start_utc = start_ist.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return (
+        db.query(Resource)
+        .filter(
+            Resource.status == "APPROVED",
+            Resource.created_at >= start_utc,
+            Resource.created_at <= end_utc,
+        )
+        .order_by(Resource.semester, Resource.subject_id, Resource.created_at.asc())
+        .all()
+    )
+
 
 
 def log_user_event(db: Session, telegram_id: int, event_type: str, details: Optional[str] = None) -> None:

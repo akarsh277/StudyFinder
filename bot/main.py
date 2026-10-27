@@ -9,7 +9,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update, BotCommand, BotCommandScopeChat, BotCommandScopeDefault
+from telegram import Update, BotCommand, BotCommandScopeChat, BotCommandScopeDefault, BotCommandScopeAllPrivateChats
 from telegram.request import HTTPXRequest
 from telegram.ext import (
     ApplicationBuilder,
@@ -20,11 +20,14 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from datetime import time as dtime
+from zoneinfo import ZoneInfo
 from config import BOT_TOKEN, CHIEF_TELEGRAM_ID
 from init_db import init_db
 from bot.handlers.start import start_handler
 from bot.handlers.access import (
     access_start_callback,
+    access_branch_callback,
     access_semester_callback,
     access_subject_callback,
     access_type_callback,
@@ -35,6 +38,7 @@ from bot.handlers.access import (
 )
 from bot.handlers.upload import (
     upload_start_callback,
+    upload_branch_callback,
     upload_semester_callback,
     upload_subject_callback,
     upload_type_callback,
@@ -46,6 +50,7 @@ from bot.handlers.admin import (
     approve_resource_callback,
     reject_resource_callback,
     delete_command_handler,
+    delete_branch_callback,
     delete_semester_callback,
     delete_subject_callback,
     delete_type_callback,
@@ -54,15 +59,25 @@ from bot.handlers.admin import (
     rename_start_callback,
     rename_title_handler,
     cancel_rename_callback,
+    add_branch_command_handler,
+    add_branch_name_handler,
+    cancel_add_branch_handler,
+    list_branches_command_handler,
+)
+from bot.handlers.notifications import (
+    send_daily_digest_job,
+    daily_digest_command_handler,
 )
 from bot.handlers.analytics import analytics_handler
 from bot.states.conversation import (
+    SELECT_BRANCH,
     SELECT_SEMESTER,
     SELECT_SUBJECT,
     SELECT_TYPE,
     ENTER_TITLE,
     UPLOAD_FILE,
     RENAME_TITLE,
+    ENTER_BRANCH_NAME,
 )
 
 # Configure logging
@@ -114,15 +129,21 @@ async def setup_bot_commands(application) -> None:
     try:
         student_commands = [
             BotCommand("start", "Open main menu"),
-            BotCommand("upload", "Upload a study resource"),
+            BotCommand("upload", "Upload study material"),
         ]
+        # Register for both default scope and all private chats so students only see /start and /upload
         await application.bot.set_my_commands(student_commands, scope=BotCommandScopeDefault())
+        await application.bot.set_my_commands(student_commands, scope=BotCommandScopeAllPrivateChats())
 
         if CHIEF_TELEGRAM_ID and CHIEF_TELEGRAM_ID != 0:
             chief_commands = [
                 BotCommand("start", "Open main menu"),
-                BotCommand("upload", "Upload a study resource"),
+                BotCommand("upload", "Upload study material"),
                 BotCommand("delete", "Manage, rename & delete resources (Chief)"),
+                BotCommand("addbranch", "Add a new branch (Chief)"),
+                BotCommand("branches", "List configured branches (Chief)"),
+                BotCommand("daily_digest", "Preview/send today's digest (Chief)"),
+                BotCommand("stats", "View 30-day analytics (Chief)"),
             ]
             await application.bot.set_my_commands(
                 chief_commands,
@@ -169,6 +190,9 @@ def main() -> None:
             CommandHandler("upload", upload_start_callback),
         ],
         states={
+            SELECT_BRANCH: [
+                CallbackQueryHandler(upload_branch_callback, pattern="^upload_branch_")
+            ],
             SELECT_SEMESTER: [
                 CallbackQueryHandler(upload_semester_callback, pattern="^upload_sem_")
             ],
@@ -186,7 +210,6 @@ def main() -> None:
             ],
         },
         fallbacks=[
-            CommandHandler("cancel", cancel_upload_handler),
             CommandHandler("start", start_handler),
         ],
         per_user=True,
@@ -205,7 +228,24 @@ def main() -> None:
         },
         fallbacks=[
             CallbackQueryHandler(cancel_rename_callback, pattern="^cancel_rename$"),
-            CommandHandler("cancel", cancel_rename_callback),
+            CommandHandler("start", start_handler),
+        ],
+        per_user=True,
+        per_chat=True,
+    )
+
+    # Add Branch ConversationHandler (Chief only)
+    add_branch_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("addbranch", add_branch_command_handler),
+        ],
+        states={
+            ENTER_BRANCH_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_branch_name_handler)
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_add_branch_handler, pattern="^cancel_add_branch$"),
             CommandHandler("start", start_handler),
         ],
         per_user=True,
@@ -216,10 +256,12 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(upload_conv_handler)
     application.add_handler(rename_conv_handler)
+    application.add_handler(add_branch_conv_handler)
 
-    # Access Resources & Navigation callbacks
+    # Access Navigation callbacks
     application.add_handler(CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"))
     application.add_handler(CallbackQueryHandler(access_start_callback, pattern="^main_access$"))
+    application.add_handler(CallbackQueryHandler(access_branch_callback, pattern="^access_branch_"))
     application.add_handler(CallbackQueryHandler(access_semester_callback, pattern="^access_sem_"))
     application.add_handler(CallbackQueryHandler(access_subject_callback, pattern="^access_subj_"))
     application.add_handler(CallbackQueryHandler(access_type_callback, pattern="^access_type_"))
@@ -229,14 +271,31 @@ def main() -> None:
 
     # Admin Chief review callbacks & commands
     application.add_handler(CommandHandler(["stats", "analytics"], analytics_handler))
+    application.add_handler(CommandHandler("branches", list_branches_command_handler))
+    application.add_handler(CommandHandler(["daily_digest", "digest", "daily_notification"], daily_digest_command_handler))
     application.add_handler(CommandHandler("delete", delete_command_handler))
+    application.add_handler(CallbackQueryHandler(delete_command_handler, pattern="^delete_main$"))
     application.add_handler(CallbackQueryHandler(approve_resource_callback, pattern="^approve_"))
     application.add_handler(CallbackQueryHandler(reject_resource_callback, pattern="^reject_"))
+    application.add_handler(CallbackQueryHandler(delete_branch_callback, pattern="^delete_branch_"))
     application.add_handler(CallbackQueryHandler(delete_semester_callback, pattern="^delete_sem_"))
     application.add_handler(CallbackQueryHandler(delete_subject_callback, pattern="^delete_subj_"))
     application.add_handler(CallbackQueryHandler(delete_type_callback, pattern="^delete_type_"))
     application.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern="^confirm_del_"))
     application.add_handler(CallbackQueryHandler(execute_delete_callback, pattern="^do_delete_"))
+
+    # Schedule end-of-day digest at 22:00 (10:00 PM) IST every day
+    if application.job_queue:
+        ist = ZoneInfo("Asia/Kolkata")
+        target_time = dtime(hour=22, minute=0, tzinfo=ist)
+        application.job_queue.run_daily(
+            send_daily_digest_job,
+            time=target_time,
+            name="daily_resource_digest"
+        )
+        logger.info("Daily resource digest job scheduled for 22:00 IST.")
+    else:
+        logger.warning("JobQueue not initialized. Scheduled daily digests disabled.")
 
     # Register error handler
     application.add_error_handler(global_error_handler)

@@ -15,15 +15,28 @@ elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+")
 engine_kwargs = {}
 if db_url.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+else:
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_recycle"] = 300
+    engine_kwargs["connect_args"] = {"connect_timeout": 15}
 
-try:
-    test_engine = create_engine(db_url, pool_pre_ping=True, **engine_kwargs)
-    with test_engine.connect() as conn:
-        pass
-    engine = test_engine
-    logger.info(f"Connected to database successfully: {db_url}")
-except Exception as e:
-    logger.warning(f"Could not connect to configured DATABASE_URL ({e}). Falling back to SQLite studyfind.db.")
+connected = False
+for attempt in range(1, 4):
+    try:
+        test_engine = create_engine(db_url, **engine_kwargs)
+        with test_engine.connect() as conn:
+            pass
+        engine = test_engine
+        logger.info(f"Connected to database successfully: {db_url}")
+        connected = True
+        break
+    except Exception as e:
+        logger.warning(f"Connection attempt {attempt}/3 to DATABASE_URL failed: {e}")
+        import time
+        time.sleep(1)
+
+if not connected:
+    logger.warning("Could not connect to configured DATABASE_URL. Falling back to SQLite studyfind.db.")
     fallback_url = "sqlite:///studyfind.db"
     engine = create_engine(fallback_url, connect_args={"check_same_thread": False, "timeout": 30})
     @event.listens_for(engine, "connect")

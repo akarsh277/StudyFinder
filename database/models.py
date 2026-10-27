@@ -14,6 +14,17 @@ class User(Base):
 
     def __repr__(self):
         return f"<User(telegram_id={self.telegram_id}, username='{self.username}', role='{self.role}')>"
+class Branch(Base):
+    __tablename__ = "branches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)  # e.g., 'CSE', 'CSE(AI)'
+    semesters = Column(String(255), default="2-2,3-1", nullable=False)  # Comma-separated semesters, e.g. '2-2,3-1'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Branch(id={self.id}, name='{self.name}', semesters='{self.semesters}')>"
+
 
 
 class Subject(Base):

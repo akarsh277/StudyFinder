@@ -3,13 +3,22 @@ from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
-from database.crud import get_subjects_by_semester, get_subject_by_id, create_resource
+from database.crud import (
+    get_all_branches,
+    get_branch_by_name,
+    get_subjects_by_semester,
+    get_subject_by_id,
+    create_resource,
+)
 from bot.keyboards.menus import (
+    get_branches_keyboard,
+    get_semesters_for_branch_keyboard,
     get_semester_keyboard,
     get_subjects_keyboard,
     get_resource_types_keyboard,
 )
 from bot.states.conversation import (
+    SELECT_BRANCH,
     SELECT_SEMESTER,
     SELECT_SUBJECT,
     SELECT_TYPE,
@@ -21,19 +30,60 @@ logger = logging.getLogger(__name__)
 
 
 async def upload_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the resource upload conversation - prompt for semester."""
+    """Start the resource upload conversation - prompt for engineering branch."""
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text(
-            text="Select Semester",
-            reply_markup=get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
-        )
+
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+    except Exception as e:
+        logger.error(f"Error getting branches for upload: {e}")
+        branches = []
+
+    text_msg = "🏛️ Select Branch\n\nChoose the engineering branch for upload:"
+    if branches:
+        reply_markup = get_branches_keyboard(branches, prefix="upload_branch", back_callback="back_to_main")
+        state_to_return = SELECT_BRANCH
     else:
-        await update.message.reply_text(
-            text="Select Semester",
-            reply_markup=get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
+        text_msg = "Select Semester"
+        reply_markup = get_semester_keyboard(prefix="upload_sem", back_callback="back_to_main")
+        state_to_return = SELECT_SEMESTER
+
+    if query:
+        await query.edit_message_text(text=text_msg, reply_markup=reply_markup)
+    elif update.message:
+        await update.message.reply_text(text=text_msg, reply_markup=reply_markup)
+    return state_to_return
+
+
+async def upload_branch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle branch selection in upload flow - prompt for semester."""
+    query = update.callback_query
+    await query.answer()
+
+    branch_name = query.data.replace("upload_branch_", "").strip()
+    context.user_data["upload_branch"] = branch_name
+
+    semesters = ["2-2", "3-1"]
+    try:
+        with get_db() as db:
+            b_obj = get_branch_by_name(db, branch_name)
+            if b_obj and b_obj.semesters:
+                semesters = [s.strip() for s in b_obj.semesters.split(",") if s.strip()]
+    except Exception as e:
+        logger.warning(f"Could not load branch semesters for upload: {e}")
+
+    await query.edit_message_text(
+        text=f"🎓 Branch: {branch_name}\n\nSelect Semester:",
+        reply_markup=get_semesters_for_branch_keyboard(
+            branch=branch_name,
+            semesters=semesters,
+            prefix="upload_sem",
+            back_callback="main_upload"
         )
+    )
     return SELECT_SEMESTER
 
 
@@ -45,6 +95,11 @@ async def upload_semester_callback(update: Update, context: ContextTypes.DEFAULT
     semester = query.data.replace("upload_sem_", "")
     context.user_data["upload_semester"] = semester
 
+    branch = context.user_data.get("upload_branch")
+    if not branch and " " in semester:
+        branch = semester.rsplit(" ", 1)[0]
+    back_cb = f"upload_branch_{branch}" if branch else "main_upload"
+
     try:
         with get_db() as db:
             subjects = get_subjects_by_semester(db, semester)
@@ -54,12 +109,14 @@ async def upload_semester_callback(update: Update, context: ContextTypes.DEFAULT
         return ConversationHandler.END
 
     if not subjects:
-        await query.edit_message_text("⚠️ No subjects registered for this semester yet.")
+        await query.edit_message_text(
+            f"⚠️ No subjects registered for {semester} yet.\n\nType /start to return to the main menu."
+        )
         return ConversationHandler.END
 
     await query.edit_message_text(
-        text="Select Subject",
-        reply_markup=get_subjects_keyboard(subjects, prefix="upload_subj", back_callback="main_upload")
+        text=f"📚 {semester} — Select Subject",
+        reply_markup=get_subjects_keyboard(subjects, prefix="upload_subj", back_callback=back_cb)
     )
     return SELECT_SUBJECT
 

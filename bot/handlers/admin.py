@@ -4,6 +4,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import (
+    get_all_branches,
+    get_branch_by_name,
+    create_branch,
     get_resource_by_id,
     update_resource_status,
     update_resource_title,
@@ -13,8 +16,10 @@ from database.crud import (
     get_approved_resources,
     get_approved_semester_pyqs,
 )
-from bot.states.conversation import RENAME_TITLE
+from bot.states.conversation import RENAME_TITLE, ENTER_BRANCH_NAME
 from bot.keyboards.menus import (
+    get_branches_keyboard,
+    get_semesters_for_branch_keyboard,
     get_semester_keyboard,
     get_subjects_keyboard,
     get_resource_types_keyboard,
@@ -152,7 +157,7 @@ async def reject_resource_callback(update: Update, context: ContextTypes.DEFAULT
 
 
 async def delete_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /delete command - prompt Chief to choose semester to delete resources."""
+    """Handle /delete command - prompt Chief to choose branch then semester to delete resources."""
     user = update.effective_user
 
     if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
@@ -161,11 +166,54 @@ async def delete_command_handler(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("⛔ You are not authorized to manage or delete resources.")
         return
 
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+    except Exception as e:
+        logger.error(f"Error fetching branches in delete_command_handler: {e}")
+        branches = []
+
+    text_msg = "🏛️ Select Branch to manage/delete resources:"
+    reply_markup = get_branches_keyboard(branches, prefix="delete_branch", back_callback="back_to_main")
+
     if update.message:
-        await update.message.reply_text(
-            text="Select Semester to manage/delete resources:",
-            reply_markup=get_semester_keyboard(prefix="delete_sem", back_callback="back_to_main")
+        await update.message.reply_text(text=text_msg, reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text=text_msg, reply_markup=reply_markup)
+
+
+async def delete_branch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle branch selection in /delete flow - prompt for semester."""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        await query.answer("⛔ Unauthorized", show_alert=True)
+        return
+
+    await query.answer()
+    branch_name = query.data.replace("delete_branch_", "").strip()
+    context.user_data["delete_branch"] = branch_name
+
+    semesters = ["2-2", "3-1"]
+    try:
+        with get_db() as db:
+            b_obj = get_branch_by_name(db, branch_name)
+            if b_obj and b_obj.semesters:
+                semesters = [s.strip() for s in b_obj.semesters.split(",") if s.strip()]
+    except Exception as e:
+        logger.warning(f"Could not load branch semesters for delete: {e}")
+
+    await query.edit_message_text(
+        text=f"🎓 Branch: {branch_name}\n\nSelect Semester to manage/delete resources:",
+        reply_markup=get_semesters_for_branch_keyboard(
+            branch=branch_name,
+            semesters=semesters,
+            prefix="delete_sem",
+            back_callback="back_to_main"
         )
+    )
 
 
 async def delete_semester_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -181,6 +229,11 @@ async def delete_semester_callback(update: Update, context: ContextTypes.DEFAULT
     semester = query.data.replace("delete_sem_", "")
     context.user_data["delete_semester"] = semester
 
+    branch = context.user_data.get("delete_branch")
+    if not branch and " " in semester:
+        branch = semester.rsplit(" ", 1)[0]
+    back_cb = f"delete_branch_{branch}" if branch else "back_to_main"
+
     try:
         with get_db() as db:
             subjects = get_subjects_by_semester(db, semester)
@@ -190,12 +243,14 @@ async def delete_semester_callback(update: Update, context: ContextTypes.DEFAULT
         return
 
     if not subjects:
-        await query.edit_message_text("⚠️ No subjects registered for this semester yet.")
+        await query.edit_message_text(
+            f"⚠️ No subjects registered for {semester} yet.\n\nType /start to return to the main menu."
+        )
         return
 
     await query.edit_message_text(
-        text="Select Subject to delete resources from:",
-        reply_markup=get_subjects_keyboard(subjects, prefix="delete_subj", back_callback="back_to_main")
+        text=f"📚 {semester} — Select Subject to delete resources from:",
+        reply_markup=get_subjects_keyboard(subjects, prefix="delete_subj", back_callback=back_cb)
     )
 
 
@@ -472,3 +527,119 @@ async def cancel_rename_callback(update: Update, context: ContextTypes.DEFAULT_T
             "Rename cancelled.\n\nType /start to return to the main menu."
         )
     return ConversationHandler.END
+
+
+async def add_branch_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Allow Chief to add a new engineering branch via Telegram."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Only the Chief can add new branches.")
+        return ConversationHandler.END
+
+    args = context.args or []
+    if args:
+        # One-line format: /addbranch ECE or /addbranch ECE 2-2,3-1
+        branch_name = args[0].strip().upper()
+        semesters = args[1].strip() if len(args) > 1 else "2-2,3-1"
+        try:
+            with get_db() as db:
+                existing = get_branch_by_name(db, branch_name)
+                if existing:
+                    await update.message.reply_text(f"⚠️ Branch '{branch_name}' already exists.")
+                    return ConversationHandler.END
+                create_branch(db, name=branch_name, semesters=semesters)
+            await update.message.reply_text(
+                f"✅ Branch *{branch_name}* added successfully!\n"
+                f"Available semesters: {semesters}\n\n"
+                f"Students can now select it in the bot menu.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error adding branch {branch_name}: {e}")
+            await update.message.reply_text(f"⚠️ Database error adding branch: {e}")
+        return ConversationHandler.END
+
+    # Interactive prompt if no args provided
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_branch")]
+    ])
+    await update.message.reply_text(
+        "🏛️ *Add New Branch (Chief Only)*\n\n"
+        "Please reply with the branch name (e.g. `ECE`, `IT`, `MECH`, `AIDS`):\n\n"
+        "Or tap Cancel below to abort.",
+        reply_markup=cancel_markup,
+        parse_mode="Markdown"
+    )
+    return ENTER_BRANCH_NAME
+
+
+async def add_branch_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text input for new branch name."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        return ConversationHandler.END
+
+    text = update.message.text.strip()
+    if not text:
+        await update.message.reply_text("Branch name cannot be empty. Please enter a valid name:")
+        return ENTER_BRANCH_NAME
+
+    parts = text.split(maxsplit=1)
+    branch_name = parts[0].strip().upper()
+    semesters = parts[1].strip() if len(parts) > 1 else "2-2,3-1"
+
+    try:
+        with get_db() as db:
+            existing = get_branch_by_name(db, branch_name)
+            if existing:
+                await update.message.reply_text(f"⚠️ Branch '{branch_name}' already exists.\n\nType /start to return.")
+                return ConversationHandler.END
+            create_branch(db, name=branch_name, semesters=semesters)
+        await update.message.reply_text(
+            f"✅ Branch *{branch_name}* added successfully!\n"
+            f"Available semesters: {semesters}\n\n"
+            f"Students can now select it in the bot menu.\nType /start to return to menu.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error creating branch: {e}")
+        await update.message.reply_text(f"⚠️ Database error creating branch: {e}")
+    return ConversationHandler.END
+
+
+async def cancel_add_branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancelling add branch flow."""
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Add branch cancelled.\n\nType /start to return.")
+    elif update.message:
+        await update.message.reply_text("Add branch cancelled.\n\nType /start to return.")
+    return ConversationHandler.END
+
+
+async def list_branches_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all configured branches."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Chief only.")
+        return
+
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+        if not branches:
+            await update.message.reply_text("No branches found in database.")
+            return
+
+        lines = ["🏛️ *Configured Engineering Branches:*", ""]
+        for idx, b in enumerate(branches, 1):
+            lines.append(f"{idx}. *{b.name}* (Semesters: {b.semesters})")
+        lines.append("")
+        lines.append("To add a new branch, use: `/addbranch <name>`")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error listing branches: {e}")
+        await update.message.reply_text(f"⚠️ Error retrieving branches: {e}")
+

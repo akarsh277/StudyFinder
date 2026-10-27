@@ -1,16 +1,88 @@
 from typing import List, Optional
 # pyrefly: ignore [missing-import]
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from database.models import Subject, Resource
+from database.models import Branch, Subject, Resource
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Return main menu buttons below start message."""
     keyboard = [
         [
-            InlineKeyboardButton("📤 Upload Resource", callback_data="main_upload"),
-            InlineKeyboardButton("📚 Access Resources", callback_data="main_access"),
+            InlineKeyboardButton("📤 Upload", callback_data="main_upload"),
+            InlineKeyboardButton("📚 Access", callback_data="main_access"),
         ]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_branch_icon(name: str) -> str:
+    """Return appropriate emoji icon for an engineering branch."""
+    n = name.upper()
+    if "AI" in n:
+        return "🤖"
+    elif "CSE" in n or "CS" in n:
+        return "💻"
+    elif "IT" in n:
+        return "🌐"
+    elif "ECE" in n or "ETC" in n:
+        return "📡"
+    elif "EEE" in n:
+        return "⚡"
+    elif "MECH" in n:
+        return "⚙️"
+    elif "CIVIL" in n:
+        return "🏗️"
+    return "🎓"
+
+
+def get_branches_keyboard(
+    branches: List[Branch],
+    prefix: str = "branch",
+    back_callback: Optional[str] = "back_to_main"
+) -> InlineKeyboardMarkup:
+    """Return inline keyboard listing engineering branches (CSE, CSE(AI), etc.)."""
+    keyboard = []
+    row = []
+    for b in branches:
+        icon = get_branch_icon(b.name)
+        row.append(InlineKeyboardButton(f"{icon} {b.name}", callback_data=f"{prefix}_{b.name}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    if back_callback:
+        keyboard.append([
+            InlineKeyboardButton("⏪ Back to Main Menu", callback_data=back_callback)
+        ])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_semesters_for_branch_keyboard(
+    branch: str,
+    semesters: Optional[List[str]] = None,
+    prefix: str = "sem",
+    back_callback: Optional[str] = None
+) -> InlineKeyboardMarkup:
+    """Return semester buttons for a selected branch (e.g. 2-2, 3-1)."""
+    if not semesters:
+        semesters = ["2-2", "3-1"]
+    keyboard = []
+    row = []
+    for sem in semesters:
+        sem_clean = sem.strip()
+        callback_data = f"{prefix}_{branch} {sem_clean}"
+        row.append(InlineKeyboardButton(f"🎓 {sem_clean}", callback_data=callback_data))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    if back_callback:
+        keyboard.append([
+            InlineKeyboardButton("⏪ Back to Branches", callback_data=back_callback)
+        ])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -132,7 +204,7 @@ def get_unavailable_keyboard(back_callback: Optional[str] = None) -> InlineKeybo
     """Return keyboard shown when source is unavailable."""
     keyboard = [
         [
-            InlineKeyboardButton("📤 Upload Resource", callback_data="start_upload_flow")
+            InlineKeyboardButton("📤 Upload", callback_data="start_upload_flow")
         ]
     ]
     if back_callback:

@@ -170,7 +170,7 @@ def main():
     group.add_argument("--file", help="Path to a single local PDF file")
     group.add_argument("--folder", help="Path to a folder containing multiple PDF files")
 
-    parser.add_argument("--semester", required=True, choices=["CSE 2-2", "CSE 3-1"], help="Semester (CSE 2-2 or CSE 3-1)")
+    parser.add_argument("--semester", required=True, help="Semester (e.g. 'CSE 2-2', 'CSE 3-1', 'CSE(AI) 3-1')")
     parser.add_argument("--subject", required=True, help="Subject name (e.g. DBMS, MEFA, DWDM, OS, etc.)")
     parser.add_argument("--type", required=True, choices=["NOTES", "PYQ", "ASSIGNMENT", "notes", "pyq", "assignment"], help="Resource type")
     parser.add_argument("--title", help="Resource title (optional for folder uploads, defaults to filename)")

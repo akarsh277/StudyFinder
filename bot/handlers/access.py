@@ -6,6 +6,8 @@ from telegram.ext import ContextTypes
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.crud import (
+    get_all_branches,
+    get_branch_by_name,
     get_subjects_by_semester,
     get_subject_by_id,
     get_approved_resources,
@@ -15,6 +17,8 @@ from database.crud import (
     log_user_event,
 )
 from bot.keyboards.menus import (
+    get_branches_keyboard,
+    get_semesters_for_branch_keyboard,
     get_semester_keyboard,
     get_subjects_keyboard,
     get_resource_types_keyboard,
@@ -40,13 +44,56 @@ async def back_to_main_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def access_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '📚 Access Resources' click - prompt user to Choose Semester."""
+    """Handle '📚 Access' click - prompt user to Choose Branch."""
     query = update.callback_query
     await query.answer()
 
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+    except Exception as e:
+        logger.error(f"Error fetching branches in access_start: {e}")
+        branches = []
+
+    if not branches:
+        # Fallback if no branches table seeded yet
+        await query.edit_message_text(
+            text="Choose Semester",
+            reply_markup=get_semester_keyboard(prefix="access_sem", back_callback="back_to_main")
+        )
+        return
+
     await query.edit_message_text(
-        text="Choose Semester",
-        reply_markup=get_semester_keyboard(prefix="access_sem", back_callback="back_to_main")
+        text="🏛️ Select Branch\n\nChoose your engineering branch:",
+        reply_markup=get_branches_keyboard(branches, prefix="access_branch", back_callback="back_to_main")
+    )
+
+
+async def access_branch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle branch selection in access flow - prompt user to Choose Semester for this branch."""
+    query = update.callback_query
+    await query.answer()
+
+    branch_name = query.data.replace("access_branch_", "").strip()
+    context.user_data["access_branch"] = branch_name
+
+    semesters = ["2-2", "3-1"]
+    try:
+        with get_db() as db:
+            b_obj = get_branch_by_name(db, branch_name)
+            if b_obj and b_obj.semesters:
+                semesters = [s.strip() for s in b_obj.semesters.split(",") if s.strip()]
+    except Exception as e:
+        logger.warning(f"Could not load branch semesters for {branch_name}: {e}")
+
+    await query.edit_message_text(
+        text=f"🎓 Branch: {branch_name}\n\nSelect your Semester:",
+        reply_markup=get_semesters_for_branch_keyboard(
+            branch=branch_name,
+            semesters=semesters,
+            prefix="access_sem",
+            back_callback="main_access"
+        )
     )
 
 
@@ -55,9 +102,15 @@ async def access_semester_callback(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
 
-    # Data format: access_sem_CSE 2-2 or access_sem_CSE 3-1
+    # Data format: access_sem_CSE 2-2, access_sem_CSE 3-1, access_sem_CSE(AI) 3-1
     semester = query.data.replace("access_sem_", "")
     context.user_data["access_semester"] = semester
+
+    # Identify branch for back button
+    branch = context.user_data.get("access_branch")
+    if not branch and " " in semester:
+        branch = semester.rsplit(" ", 1)[0]
+    back_to_sem_list = f"access_branch_{branch}" if branch else "main_access"
 
     try:
         with get_db() as db:
@@ -72,13 +125,13 @@ async def access_semester_callback(update: Update, context: ContextTypes.DEFAULT
     if not subjects:
         await query.edit_message_text(
             text="⚠️ Source unavailable",
-            reply_markup=get_unavailable_keyboard(back_callback="main_access")
+            reply_markup=get_unavailable_keyboard(back_callback=back_to_sem_list)
         )
         return
 
     await query.edit_message_text(
-        text="Select Subject",
-        reply_markup=get_subjects_keyboard(subjects, prefix="access_subj", back_callback="main_access")
+        text=f"📚 {semester} — Select Subject",
+        reply_markup=get_subjects_keyboard(subjects, prefix="access_subj", back_callback=back_to_sem_list)
     )
 
 
@@ -93,7 +146,7 @@ async def access_subject_callback(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text("Session expired. Please start again with /start.")
             return
         context.user_data["access_is_pyq"] = True
-        back_cb = "main_access"
+        back_cb = f"access_sem_{semester}" if semester else "main_access"
         try:
             with get_db() as db:
                 if update.effective_user:
