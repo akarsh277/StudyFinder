@@ -1,5 +1,5 @@
 import logging
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
@@ -244,19 +244,49 @@ async def upload_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⚠️ Failed to submit resource due to database error. Please try again.")
         return ConversationHandler.END
 
-    # Success completion message in text
+    repeat_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"➕ Upload another for {subject_name}", callback_data="upload_more_same"),
+            InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main"),
+        ]
+    ])
+
     await update.message.reply_text(
-        "✅ Resource uploaded successfully!\n\n"
-        "Type /start to return to the main menu."
+        f"✅ *{title}* uploaded successfully!\n\n"
+        f"📚 Subject: {subject_name} ({semester})\n"
+        f"📋 Type: {resource_type.capitalize()}\n\n"
+        f"Tap below to add another file for this subject or return to main menu:",
+        reply_markup=repeat_markup,
+        parse_mode="Markdown"
     )
 
-    # Clear upload state
+    # Clear title only, keep subject context in case user taps 'upload another'
     context.user_data.pop("upload_title", None)
-    context.user_data.pop("upload_semester", None)
-    context.user_data.pop("upload_subject_id", None)
-    context.user_data.pop("upload_resource_type", None)
 
     return ConversationHandler.END
+
+
+async def upload_more_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Allow immediate upload of another file for the same subject without repeating menus."""
+    query = update.callback_query
+    await query.answer()
+
+    semester = context.user_data.get("upload_semester")
+    subject_id = context.user_data.get("upload_subject_id")
+
+    if not semester or not subject_id:
+        from bot.keyboards.menus import get_main_menu_keyboard
+        from bot.handlers.start import START_MESSAGE
+        await query.edit_message_text(
+            text=START_MESSAGE,
+            reply_markup=get_main_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        "📝 Enter the resource title for the next file:\n\nExample: Unit 4 Notes"
+    )
+    return ENTER_TITLE
 
 
 async def cancel_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

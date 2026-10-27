@@ -13,7 +13,13 @@ from telegram.request import HTTPXRequest
 from config import BOT_TOKEN, CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.models import Subject, User
-from database.crud import create_resource
+from database.crud import (
+    create_resource,
+    create_subject,
+    create_branch,
+    get_branch_by_name,
+    add_semester_to_branch,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,7 +53,7 @@ async def upload_local_file(
         print("Error: --type must be one of: NOTES, PYQ, ASSIGNMENT", flush=True)
         return
 
-    # Find matching subject in DB
+    # Find matching subject in DB (or auto-create dynamically)
     with get_db() as db:
         subject = (
             db.query(Subject)
@@ -62,11 +68,17 @@ async def upload_local_file(
             )
 
         if not subject:
-            available_subjects = db.query(Subject).filter(Subject.semester == semester).all()
-            avail_names = [s.name for s in available_subjects]
-            print(f"Error: Subject '{subject_name}' not found for {semester}.", flush=True)
-            print(f"Available subjects for {semester}: {', '.join(avail_names)}", flush=True)
-            return
+            print(f"Notice: Subject '{subject_name}' does not exist for {semester}. Auto-creating...", flush=True)
+            subject = create_subject(db, name=subject_name, semester=semester)
+            # Ensure branch and semester registered
+            if " " in semester:
+                b_name, sem_code = semester.rsplit(" ", 1)
+                b_obj = get_branch_by_name(db, b_name)
+                if not b_obj:
+                    create_branch(db, name=b_name, semesters=sem_code)
+                else:
+                    add_semester_to_branch(db, b_name, sem_code)
+            print(f"Auto-created subject '{subject.name}' for {semester} in database!", flush=True)
 
         subject_id = subject.id
         subject_official_name = subject.name
@@ -128,17 +140,54 @@ async def upload_local_file(
 
 
 async def process_uploads(args):
-    if args.folder:
+    if args.batch:
+        if not os.path.exists(args.batch):
+            print(f"Error: Batch directory not found: {args.batch}", flush=True)
+            return
+
+        subdirs = [os.path.join(args.batch, d) for d in os.listdir(args.batch) if os.path.isdir(os.path.join(args.batch, d))]
+        if not subdirs:
+            print(f"Error: No subject subfolders found inside '{args.batch}'.", flush=True)
+            return
+
+        print(f"Found {len(subdirs)} subject folder(s) in '{args.batch}'. Starting batch sync...", flush=True)
+        total_uploaded = 0
+        for subj_dir in sorted(subdirs):
+            subj_name = os.path.basename(subj_dir)
+            doc_files = [
+                os.path.join(subj_dir, f) for f in os.listdir(subj_dir)
+                if any(f.lower().endswith(ext) for ext in (".pdf", ".doc", ".docx"))
+            ]
+            if not doc_files:
+                continue
+            print(f"\n📂 Processing Subject: {subj_name} ({len(doc_files)} file(s))...", flush=True)
+            for file_path in sorted(doc_files):
+                await upload_local_file(
+                    file_path=file_path,
+                    semester=args.semester,
+                    subject_name=subj_name,
+                    resource_type=args.type,
+                    title=None,
+                    status=args.status
+                )
+                total_uploaded += 1
+        print(f"\n🎉 Batch upload complete! Total {total_uploaded} files uploaded across {len(subdirs)} subjects.", flush=True)
+
+    elif args.folder:
         if not os.path.exists(args.folder):
             print(f"Error: Folder not found: {args.folder}", flush=True)
             return
 
-        pdf_files = [os.path.join(args.folder, f) for f in os.listdir(args.folder) if f.lower().endswith(".pdf")]
+        pdf_files = [os.path.join(args.folder, f) for f in os.listdir(args.folder) if any(f.lower().endswith(ext) for ext in (".pdf", ".doc", ".docx"))]
         if not pdf_files:
-            print(f"Error: No PDF files found in folder: {args.folder}", flush=True)
+            print(f"Error: No document files found in folder: {args.folder}", flush=True)
             return
 
-        print(f"Found {len(pdf_files)} PDF file(s) in '{args.folder}'. Starting batch upload...", flush=True)
+        if not args.subject:
+            print("Error: --subject is required when using --folder.", flush=True)
+            return
+
+        print(f"Found {len(pdf_files)} document file(s) in '{args.folder}'. Starting batch upload...", flush=True)
         for pdf_path in sorted(pdf_files):
             custom_title = args.title if (len(pdf_files) == 1 and args.title) else None
             await upload_local_file(
@@ -152,6 +201,10 @@ async def process_uploads(args):
         print(f"\n🎉 All {len(pdf_files)} file(s) uploaded and registered successfully!", flush=True)
 
     elif args.file:
+        if not args.subject:
+            print("Error: --subject is required when using --file.", flush=True)
+            return
+
         await upload_local_file(
             file_path=args.file,
             semester=args.semester,
@@ -161,19 +214,20 @@ async def process_uploads(args):
             status=args.status
         )
     else:
-        print("Error: You must specify either --file or --folder.", flush=True)
+        print("Error: You must specify --file, --folder, or --batch.", flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Upload local PDF files/folders to StudyFind Telegram Bot")
+    parser = argparse.ArgumentParser(description="Upload local PDF/DOC files or full multi-subject folders to StudyFind")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--file", help="Path to a single local PDF file")
-    group.add_argument("--folder", help="Path to a folder containing multiple PDF files")
+    group.add_argument("--file", help="Path to a single local document file")
+    group.add_argument("--folder", help="Path to a folder containing files for a single subject")
+    group.add_argument("--batch", help="Path to a directory containing subfolders per subject (e.g. root/DBMS/*.pdf, root/OS/*.pdf)")
 
     parser.add_argument("--semester", required=True, help="Semester (e.g. 'CSE 2-2', 'CSE 3-1', 'CSE(AI) 3-1')")
-    parser.add_argument("--subject", required=True, help="Subject name (e.g. DBMS, MEFA, DWDM, OS, etc.)")
-    parser.add_argument("--type", required=True, choices=["NOTES", "PYQ", "ASSIGNMENT", "notes", "pyq", "assignment"], help="Resource type")
-    parser.add_argument("--title", help="Resource title (optional for folder uploads, defaults to filename)")
+    parser.add_argument("--subject", help="Subject name (e.g. DBMS, OS). Auto-inferred from folder name when using --batch.")
+    parser.add_argument("--type", default="NOTES", choices=["NOTES", "PYQ", "ASSIGNMENT", "notes", "pyq", "assignment"], help="Resource type (default NOTES)")
+    parser.add_argument("--title", help="Resource title (optional, defaults to filename without extension)")
     parser.add_argument("--status", default="APPROVED", choices=["APPROVED", "PENDING"], help="Status (default APPROVED)")
 
     args = parser.parse_args()

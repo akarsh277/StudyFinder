@@ -7,6 +7,9 @@ from database.crud import (
     get_all_branches,
     get_branch_by_name,
     create_branch,
+    add_semester_to_branch,
+    create_subject,
+    get_all_subjects,
     get_resource_by_id,
     update_resource_status,
     update_resource_title,
@@ -16,7 +19,15 @@ from database.crud import (
     get_approved_resources,
     get_approved_semester_pyqs,
 )
-from bot.states.conversation import RENAME_TITLE, ENTER_BRANCH_NAME
+from bot.states.conversation import (
+    RENAME_TITLE,
+    ENTER_BRANCH_NAME,
+    SELECT_BRANCH_FOR_SEM,
+    ENTER_SEM_NAME,
+    SELECT_BRANCH_FOR_SUBJ,
+    SELECT_SEM_FOR_SUBJ,
+    ENTER_SUBJ_NAME,
+)
 from bot.keyboards.menus import (
     get_branches_keyboard,
     get_semesters_for_branch_keyboard,
@@ -638,8 +649,377 @@ async def list_branches_command_handler(update: Update, context: ContextTypes.DE
             lines.append(f"{idx}. *{b.name}* (Semesters: {b.semesters})")
         lines.append("")
         lines.append("To add a new branch, use: `/addbranch <name>`")
+        lines.append("To add a semester, use: `/addsem <branch> <sem>`")
+        lines.append("To add a subject, use: `/addsubject <branch> <sem> <subject>`")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Error listing branches: {e}")
         await update.message.reply_text(f"⚠️ Error retrieving branches: {e}")
+
+
+async def admin_panel_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display interactive Chief control panel with action buttons."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Chief only.")
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🏛️ Add Branch", callback_data="admin_btn_addbranch"),
+            InlineKeyboardButton("🎓 Add Semester", callback_data="admin_btn_addsem"),
+        ],
+        [
+            InlineKeyboardButton("📖 Add Subject", callback_data="admin_btn_addsubj"),
+            InlineKeyboardButton("📚 View Subjects", callback_data="admin_btn_viewsubj"),
+        ],
+        [
+            InlineKeyboardButton("🗑️ Manage / Delete Files", callback_data="delete_main"),
+            InlineKeyboardButton("📢 Daily Digest", callback_data="admin_btn_digest"),
+        ],
+        [
+            InlineKeyboardButton("📊 30-Day Analytics", callback_data="admin_btn_stats"),
+            InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_main"),
+        ]
+    ]
+
+    text = (
+        "🛠️ *Chief Control Center*\n\n"
+        "Manage branches, semesters, subjects, and resources directly without touching code:"
+    )
+    if update.message:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+# --- Add Semester Handlers ---
+async def add_sem_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Add a semester to a branch (e.g. /addsem CSE 3-2 or interactive)."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Chief only.")
+        return ConversationHandler.END
+
+    args = context.args or []
+    if len(args) >= 2:
+        branch_name = args[0].strip().upper()
+        sem_code = args[1].strip()
+        try:
+            with get_db() as db:
+                b = add_semester_to_branch(db, branch_name, sem_code)
+                if not b:
+                    await update.message.reply_text(f"⚠️ Branch '{branch_name}' not found. Add it first with /addbranch {branch_name}")
+                    return ConversationHandler.END
+            await update.message.reply_text(
+                f"✅ Semester *{sem_code}* added to branch *{branch_name}*!\n\n"
+                f"Active semesters: {b.semesters}\nStudents can now select it.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error adding semester: {e}")
+            await update.message.reply_text(f"⚠️ Error: {e}")
+        return ConversationHandler.END
+
+    # Interactive flow
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+    except Exception as e:
+        branches = []
+
+    if not branches:
+        msg = "⚠️ No branches found. Please add a branch first with /addbranch"
+        if update.message:
+            await update.message.reply_text(msg)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        return ConversationHandler.END
+
+    keyboard = []
+    row = []
+    for b in branches:
+        row.append(InlineKeyboardButton(f"🏛️ {b.name}", callback_data=f"addsem_br_{b.name}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_sem")])
+
+    text = "🎓 *Add Semester (Chief Only)*\n\nSelect which branch to add a semester to:"
+    if update.message:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return SELECT_BRANCH_FOR_SEM
+
+
+async def add_sem_branch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle branch selection in add semester flow."""
+    query = update.callback_query
+    await query.answer()
+
+    branch_name = query.data.replace("addsem_br_", "").strip()
+    context.user_data["addsem_branch"] = branch_name
+
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_sem")]
+    ])
+    await query.edit_message_text(
+        f"🎓 Branch: *{branch_name}*\n\n"
+        f"Please reply with the semester code to add (e.g. `1-1`, `1-2`, `2-1`, `2-2`, `3-1`, `3-2`, `4-1`, `4-2`):",
+        reply_markup=cancel_markup,
+        parse_mode="Markdown"
+    )
+    return ENTER_SEM_NAME
+
+
+async def add_sem_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text input for new semester code."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        return ConversationHandler.END
+
+    sem_code = update.message.text.strip()
+    branch_name = context.user_data.get("addsem_branch")
+    if not branch_name:
+        await update.message.reply_text("Session expired. Please restart with /addsem")
+        return ConversationHandler.END
+
+    try:
+        with get_db() as db:
+            b = add_semester_to_branch(db, branch_name, sem_code)
+            if not b:
+                await update.message.reply_text(f"⚠️ Branch '{branch_name}' not found.")
+                return ConversationHandler.END
+        context.user_data.pop("addsem_branch", None)
+        await update.message.reply_text(
+            f"✅ Semester *{sem_code}* added to *{branch_name}*!\n\n"
+            f"Active semesters: {b.semesters}\n"
+            f"Type /start or /admin to continue.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error adding semester: {e}")
+        await update.message.reply_text(f"⚠️ Database error adding semester: {e}")
+    return ConversationHandler.END
+
+
+async def cancel_add_sem_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancelling add semester flow."""
+    context.user_data.pop("addsem_branch", None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Add semester cancelled.\n\nType /start or /admin to return.")
+    elif update.message:
+        await update.message.reply_text("Add semester cancelled.\n\nType /start or /admin to return.")
+    return ConversationHandler.END
+
+
+# --- Add Subject Handlers ---
+async def add_subj_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Add a subject dynamically to a branch & semester without touching code."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Chief only.")
+        return ConversationHandler.END
+
+    args = context.args or []
+    if len(args) >= 3:
+        # One line: /addsubject CSE 3-1 MachineLearning
+        branch_name = args[0].strip().upper()
+        sem_code = args[1].strip()
+        subject_name = " ".join(args[2:]).strip()
+        full_sem = f"{branch_name} {sem_code}"
+        try:
+            with get_db() as db:
+                add_semester_to_branch(db, branch_name, sem_code)
+                s = create_subject(db, name=subject_name, semester=full_sem)
+            await update.message.reply_text(
+                f"✅ Subject *{s.name}* added successfully to *{full_sem}*!\n\n"
+                f"Students can now immediately upload and access notes for this subject.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error adding subject: {e}")
+            await update.message.reply_text(f"⚠️ Error: {e}")
+        return ConversationHandler.END
+
+    # Interactive flow
+    try:
+        with get_db() as db:
+            branches = get_all_branches(db)
+    except Exception as e:
+        branches = []
+
+    if not branches:
+        msg = "⚠️ No branches configured yet. Add one with /addbranch"
+        if update.message:
+            await update.message.reply_text(msg)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        return ConversationHandler.END
+
+    keyboard = []
+    row = []
+    for b in branches:
+        row.append(InlineKeyboardButton(f"🏛️ {b.name}", callback_data=f"addsub_br_{b.name}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_subj")])
+
+    text = "📖 *Add Subject (Chief Only)*\n\nStep 1: Select Branch:"
+    if update.message:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return SELECT_BRANCH_FOR_SUBJ
+
+
+async def add_subj_branch_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle branch selection in add subject flow - show semesters."""
+    query = update.callback_query
+    await query.answer()
+
+    branch_name = query.data.replace("addsub_br_", "").strip()
+    context.user_data["addsub_branch"] = branch_name
+
+    semesters = ["2-2", "3-1"]
+    try:
+        with get_db() as db:
+            b_obj = get_branch_by_name(db, branch_name)
+            if b_obj and b_obj.semesters:
+                semesters = [s.strip() for s in b_obj.semesters.split(",") if s.strip()]
+    except Exception as e:
+        logger.warning(f"Error reading branch semesters: {e}")
+
+    keyboard = []
+    row = []
+    for sem in semesters:
+        row.append(InlineKeyboardButton(f"🎓 {sem}", callback_data=f"addsub_sem_{sem}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_subj")])
+
+    await query.edit_message_text(
+        f"📖 *Add Subject — {branch_name}*\n\nStep 2: Select Semester:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    return SELECT_SEM_FOR_SUBJ
+
+
+async def add_subj_sem_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle semester selection in add subject flow - prompt for subject name."""
+    query = update.callback_query
+    await query.answer()
+
+    sem_code = query.data.replace("addsub_sem_", "").strip()
+    branch_name = context.user_data.get("addsub_branch", "CSE")
+    full_sem = f"{branch_name} {sem_code}"
+    context.user_data["addsub_semester"] = full_sem
+
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_subj")]
+    ])
+    await query.edit_message_text(
+        f"📖 *Add Subject to {full_sem}*\n\n"
+        f"Step 3: Please reply with the Subject Name (e.g. `Machine Learning`, `AI`, `Signals & Systems`):",
+        reply_markup=cancel_markup,
+        parse_mode="Markdown"
+    )
+    return ENTER_SUBJ_NAME
+
+
+async def add_subj_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle text input for subject name and save to DB."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        return ConversationHandler.END
+
+    subj_name = update.message.text.strip()
+    full_sem = context.user_data.get("addsub_semester")
+    if not full_sem:
+        await update.message.reply_text("Session expired. Please restart with /addsubject")
+        return ConversationHandler.END
+
+    try:
+        with get_db() as db:
+            s = create_subject(db, name=subj_name, semester=full_sem)
+        context.user_data.pop("addsub_branch", None)
+        context.user_data.pop("addsub_semester", None)
+        await update.message.reply_text(
+            f"✅ Subject *{s.name}* created successfully for *{full_sem}*!\n\n"
+            f"It is now immediately available in the bot for notes upload and access.\n"
+            f"Type /start or /admin to return.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error creating subject: {e}")
+        await update.message.reply_text(f"⚠️ Database error creating subject: {e}")
+    return ConversationHandler.END
+
+
+async def cancel_add_subj_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancelling add subject flow."""
+    context.user_data.pop("addsub_branch", None)
+    context.user_data.pop("addsub_semester", None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("Add subject cancelled.\n\nType /start or /admin to return.")
+    elif update.message:
+        await update.message.reply_text("Add subject cancelled.\n\nType /start or /admin to return.")
+    return ConversationHandler.END
+
+
+async def list_subjects_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all registered subjects grouped by semester."""
+    user = update.effective_user
+    if not user or CHIEF_TELEGRAM_ID == 0 or user.id != CHIEF_TELEGRAM_ID:
+        if update.message:
+            await update.message.reply_text("⛔ Unauthorized: Chief only.")
+        return
+
+    try:
+        with get_db() as db:
+            subjects = get_all_subjects(db)
+        if not subjects:
+            text = "No subjects registered yet in the database."
+        else:
+            from collections import defaultdict
+            grouped = defaultdict(list)
+            for s in subjects:
+                grouped[s.semester].append(s.name)
+
+            lines = ["📚 *Registered Subjects in StudyFind:*", ""]
+            for sem, subj_list in grouped.items():
+                lines.append(f"🎓 *{sem}* ({len(subj_list)} subjects):")
+                lines.append("  • " + ", ".join(subj_list))
+                lines.append("")
+            lines.append("To add a new subject, use: `/addsubject`")
+            text = "\n".join(lines).strip()
+
+        if update.message:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        elif update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error listing subjects: {e}")
+        if update.message:
+            await update.message.reply_text(f"⚠️ Error: {e}")
+
 

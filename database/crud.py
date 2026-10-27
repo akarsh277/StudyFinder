@@ -145,6 +145,45 @@ def create_branch(db: Session, name: str, semesters: str = "2-2,3-1") -> Branch:
     return branch
 
 
+def add_semester_to_branch(db: Session, branch_name: str, semester_code: str) -> Optional[Branch]:
+    """Add a semester code (e.g. '3-2') to a branch's semesters list if not already present."""
+    branch = get_branch_by_name(db, branch_name)
+    if not branch:
+        return None
+    current_sems = [s.strip() for s in branch.semesters.split(",") if s.strip()]
+    sem_clean = semester_code.strip()
+    if sem_clean not in current_sems:
+        current_sems.append(sem_clean)
+        branch.semesters = ",".join(current_sems)
+        db.commit()
+        db.refresh(branch)
+    return branch
+
+
+def create_subject(db: Session, name: str, semester: str) -> Subject:
+    """Dynamically create a new subject for a semester (e.g. 'ML' for 'CSE 3-1')."""
+    clean_name = name.strip()
+    clean_semester = semester.strip()
+    existing = (
+        db.query(Subject)
+        .filter(func.lower(Subject.name) == clean_name.lower(), Subject.semester == clean_semester)
+        .first()
+    )
+    if existing:
+        return existing
+    new_subj = Subject(name=clean_name, semester=clean_semester)
+    db.add(new_subj)
+    db.commit()
+    db.refresh(new_subj)
+    return new_subj
+
+
+def get_all_subjects(db: Session) -> List[Subject]:
+    """Retrieve all subjects ordered by semester, then id."""
+    return db.query(Subject).order_by(Subject.semester, Subject.id).all()
+
+
+
 def seed_initial_branches(db: Session) -> None:
     """Seed initial branches CSE and CSE(AI) if not present."""
     default_branches = [

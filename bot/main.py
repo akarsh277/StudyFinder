@@ -44,6 +44,7 @@ from bot.handlers.upload import (
     upload_type_callback,
     upload_title_handler,
     upload_file_handler,
+    upload_more_callback,
     cancel_upload_handler,
 )
 from bot.handlers.admin import (
@@ -59,10 +60,21 @@ from bot.handlers.admin import (
     rename_start_callback,
     rename_title_handler,
     cancel_rename_callback,
+    admin_panel_command_handler,
     add_branch_command_handler,
     add_branch_name_handler,
     cancel_add_branch_handler,
     list_branches_command_handler,
+    add_sem_command_handler,
+    add_sem_branch_callback,
+    add_sem_name_handler,
+    cancel_add_sem_handler,
+    add_subj_command_handler,
+    add_subj_branch_callback,
+    add_subj_sem_callback,
+    add_subj_name_handler,
+    cancel_add_subj_handler,
+    list_subjects_command_handler,
 )
 from bot.handlers.notifications import (
     send_daily_digest_job,
@@ -78,6 +90,11 @@ from bot.states.conversation import (
     UPLOAD_FILE,
     RENAME_TITLE,
     ENTER_BRANCH_NAME,
+    SELECT_BRANCH_FOR_SEM,
+    ENTER_SEM_NAME,
+    SELECT_BRANCH_FOR_SUBJ,
+    SELECT_SEM_FOR_SUBJ,
+    ENTER_SUBJ_NAME,
 )
 
 # Configure logging
@@ -139,9 +156,13 @@ async def setup_bot_commands(application) -> None:
             chief_commands = [
                 BotCommand("start", "Open main menu"),
                 BotCommand("upload", "Upload study material"),
-                BotCommand("delete", "Manage, rename & delete resources (Chief)"),
+                BotCommand("admin", "Chief Control Center"),
                 BotCommand("addbranch", "Add a new branch (Chief)"),
+                BotCommand("addsem", "Add semester to branch (Chief)"),
+                BotCommand("addsubject", "Add a subject (Chief)"),
+                BotCommand("subjects", "List all subjects (Chief)"),
                 BotCommand("branches", "List configured branches (Chief)"),
+                BotCommand("delete", "Manage, rename & delete files (Chief)"),
                 BotCommand("daily_digest", "Preview/send today's digest (Chief)"),
                 BotCommand("stats", "View 30-day analytics (Chief)"),
             ]
@@ -188,6 +209,7 @@ def main() -> None:
         entry_points=[
             CallbackQueryHandler(upload_start_callback, pattern="^(main_upload|start_upload_flow)$"),
             CommandHandler("upload", upload_start_callback),
+            CallbackQueryHandler(upload_more_callback, pattern="^upload_more_same$"),
         ],
         states={
             SELECT_BRANCH: [
@@ -238,6 +260,7 @@ def main() -> None:
     add_branch_conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("addbranch", add_branch_command_handler),
+            CallbackQueryHandler(add_branch_command_handler, pattern="^admin_btn_addbranch$"),
         ],
         states={
             ENTER_BRANCH_NAME: [
@@ -252,11 +275,60 @@ def main() -> None:
         per_chat=True,
     )
 
+    # Add Semester ConversationHandler (Chief only)
+    add_sem_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler(["addsem", "addsemester"], add_sem_command_handler),
+            CallbackQueryHandler(add_sem_command_handler, pattern="^admin_btn_addsem$"),
+        ],
+        states={
+            SELECT_BRANCH_FOR_SEM: [
+                CallbackQueryHandler(add_sem_branch_callback, pattern="^addsem_br_")
+            ],
+            ENTER_SEM_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_sem_name_handler)
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_add_sem_handler, pattern="^cancel_add_sem$"),
+            CommandHandler("start", start_handler),
+        ],
+        per_user=True,
+        per_chat=True,
+    )
+
+    # Add Subject ConversationHandler (Chief only)
+    add_subj_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler(["addsubject", "addsubj"], add_subj_command_handler),
+            CallbackQueryHandler(add_subj_command_handler, pattern="^admin_btn_addsubj$"),
+        ],
+        states={
+            SELECT_BRANCH_FOR_SUBJ: [
+                CallbackQueryHandler(add_subj_branch_callback, pattern="^addsub_br_")
+            ],
+            SELECT_SEM_FOR_SUBJ: [
+                CallbackQueryHandler(add_subj_sem_callback, pattern="^addsub_sem_")
+            ],
+            ENTER_SUBJ_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_subj_name_handler)
+            ],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_add_subj_handler, pattern="^cancel_add_subj$"),
+            CommandHandler("start", start_handler),
+        ],
+        per_user=True,
+        per_chat=True,
+    )
+
     # Register handlers
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(upload_conv_handler)
     application.add_handler(rename_conv_handler)
     application.add_handler(add_branch_conv_handler)
+    application.add_handler(add_sem_conv_handler)
+    application.add_handler(add_subj_conv_handler)
 
     # Access Navigation callbacks
     application.add_handler(CallbackQueryHandler(back_to_main_callback, pattern="^back_to_main$"))
@@ -269,9 +341,14 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(access_restore_view_callback, pattern="^access_restore_view$"))
     application.add_handler(CallbackQueryHandler(download_resource_callback, pattern="^download_"))
 
-    # Admin Chief review callbacks & commands
+    # Admin Chief Control Center & Commands
+    application.add_handler(CommandHandler(["admin", "manage"], admin_panel_command_handler))
     application.add_handler(CommandHandler(["stats", "analytics"], analytics_handler))
     application.add_handler(CommandHandler("branches", list_branches_command_handler))
+    application.add_handler(CommandHandler("subjects", list_subjects_command_handler))
+    application.add_handler(CallbackQueryHandler(list_subjects_command_handler, pattern="^admin_btn_viewsubj$"))
+    application.add_handler(CallbackQueryHandler(analytics_handler, pattern="^admin_btn_stats$"))
+    application.add_handler(CallbackQueryHandler(daily_digest_command_handler, pattern="^admin_btn_digest$"))
     application.add_handler(CommandHandler(["daily_digest", "digest", "daily_notification"], daily_digest_command_handler))
     application.add_handler(CommandHandler("delete", delete_command_handler))
     application.add_handler(CallbackQueryHandler(delete_command_handler, pattern="^delete_main$"))
