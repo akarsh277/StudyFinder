@@ -8,13 +8,13 @@ from telegram.ext import ContextTypes
 from config import CHIEF_TELEGRAM_ID
 from database.connection import get_db
 from database.models import User, Subject, Resource
-from database.crud import get_resources_uploaded_today
+from database.crud import get_resources_uploaded_today, natural_sort_key
 
 logger = logging.getLogger(__name__)
 
 
 def build_daily_digest_message(db, target_date: Optional[date] = None) -> Optional[str]:
-    """Build formatted digest message for resources uploaded on a given date (IST)."""
+    """Build formatted digest message for resources uploaded on a given date (IST) in alphabetical order."""
     ist = ZoneInfo("Asia/Kolkata")
     now_ist = datetime.now(ist)
     ref_date = target_date or now_ist.date()
@@ -31,7 +31,6 @@ def build_daily_digest_message(db, target_date: Optional[date] = None) -> Option
             Resource.created_at >= start_utc,
             Resource.created_at <= end_utc,
         )
-        .order_by(Resource.semester, Resource.subject_id, Resource.created_at.asc())
         .all()
     )
 
@@ -41,6 +40,16 @@ def build_daily_digest_message(db, target_date: Optional[date] = None) -> Option
     # Load subjects mapping
     subj_ids = {r.subject_id for r in resources}
     subjects = {s.id: s.name for s in db.query(Subject).filter(Subject.id.in_(subj_ids)).all()} if subj_ids else {}
+
+    # Sort resources naturally by semester, subject name, and title
+    sorted_resources = sorted(
+        resources,
+        key=lambda r: (
+            r.semester.lower(),
+            subjects.get(r.subject_id, "").lower(),
+            natural_sort_key(r.title or "")
+        )
+    )
 
     date_str = ref_date.strftime("%d %b %Y")
     lines = [
@@ -52,7 +61,7 @@ def build_daily_digest_message(db, target_date: Optional[date] = None) -> Option
 
     # Group by semester
     grouped = defaultdict(list)
-    for r in resources:
+    for r in sorted_resources:
         subj_name = subjects.get(r.subject_id, "Subject")
         type_str = r.resource_type.capitalize()
         grouped[r.semester].append(f"• {subj_name}: {r.title} ({type_str})")

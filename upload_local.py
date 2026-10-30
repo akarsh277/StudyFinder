@@ -20,6 +20,7 @@ from database.crud import (
     get_branch_by_name,
     add_semester_to_branch,
     check_duplicate_resource,
+    natural_sort_key,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -165,7 +166,7 @@ async def process_uploads(args):
 
         print(f"Found {len(subdirs)} subject folder(s) in '{args.batch}'. Starting batch sync...", flush=True)
         total_uploaded = 0
-        for subj_dir in sorted(subdirs):
+        for subj_dir in sorted(subdirs, key=lambda d: natural_sort_key(os.path.basename(d))):
             subj_name = os.path.basename(subj_dir)
             doc_files = [
                 os.path.join(subj_dir, f) for f in os.listdir(subj_dir)
@@ -174,7 +175,7 @@ async def process_uploads(args):
             if not doc_files:
                 continue
             print(f"\n📂 Processing Subject: {subj_name} ({len(doc_files)} file(s))...", flush=True)
-            for file_path in sorted(doc_files):
+            for file_path in sorted(doc_files, key=lambda f: natural_sort_key(os.path.basename(f))):
                 await upload_local_file(
                     file_path=file_path,
                     semester=args.semester,
@@ -201,7 +202,7 @@ async def process_uploads(args):
             return
 
         print(f"Found {len(pdf_files)} document file(s) in '{args.folder}'. Starting batch upload...", flush=True)
-        for pdf_path in sorted(pdf_files):
+        for pdf_path in sorted(pdf_files, key=lambda f: natural_sort_key(os.path.basename(f))):
             custom_title = args.title if (len(pdf_files) == 1 and args.title) else None
             await upload_local_file(
                 file_path=pdf_path,

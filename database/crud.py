@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Dict, Any
@@ -8,6 +9,17 @@ from sqlalchemy.orm import Session
 from database.models import User, Branch, Subject, Resource, UserEvent
 
 logger = logging.getLogger(__name__)
+
+
+def natural_sort_key(s: str) -> list:
+    """
+    Key for natural alphabetical sorting (A-Z, case-insensitive, with numbers ordered numerically).
+    Produces clean Windows Explorer-like ordering (e.g., Unit 1, Unit 2 ... Unit 10).
+    """
+    if not s:
+        return []
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
 
 def get_or_create_user(db: Session, telegram_id: int, username: Optional[str] = None, role: str = "STUDENT") -> User:
     """Retrieve user or create if not exists."""
@@ -25,8 +37,14 @@ def get_or_create_user(db: Session, telegram_id: int, username: Optional[str] = 
 
 
 def get_subjects_by_semester(db: Session, semester: str) -> List[Subject]:
-    """Retrieve all subjects for a specific semester."""
-    return db.query(Subject).filter(Subject.semester == semester).order_by(Subject.id).all()
+    """Retrieve all subjects for a specific semester in alphabetical order."""
+    subjects = (
+        db.query(Subject)
+        .filter(Subject.semester == semester)
+        .order_by(func.lower(Subject.name).asc(), Subject.id.asc())
+        .all()
+    )
+    return sorted(subjects, key=lambda s: natural_sort_key(s.name))
 
 
 def get_subject_by_id(db: Session, subject_id: int) -> Optional[Subject]:
@@ -35,8 +53,8 @@ def get_subject_by_id(db: Session, subject_id: int) -> Optional[Subject]:
 
 
 def get_approved_resources(db: Session, semester: str, subject_id: int, resource_type: str) -> List[Resource]:
-    """Retrieve approved resources matching semester, subject, and resource_type."""
-    return (
+    """Retrieve approved resources matching semester, subject, and resource_type in alphabetical order."""
+    resources = (
         db.query(Resource)
         .filter(
             Resource.semester == semester,
@@ -44,23 +62,25 @@ def get_approved_resources(db: Session, semester: str, subject_id: int, resource
             Resource.resource_type == resource_type,
             Resource.status == "APPROVED"
         )
-        .order_by(Resource.created_at.desc())
+        .order_by(func.lower(Resource.title).asc(), Resource.id.asc())
         .all()
     )
+    return sorted(resources, key=lambda r: natural_sort_key(r.title or ""))
 
 
 def get_approved_semester_pyqs(db: Session, semester: str) -> List[Resource]:
-    """Retrieve all approved PYQ resources for a specific semester regardless of subject."""
-    return (
+    """Retrieve all approved PYQ resources for a specific semester regardless of subject in alphabetical order."""
+    resources = (
         db.query(Resource)
         .filter(
             Resource.semester == semester,
             Resource.resource_type == "PYQ",
             Resource.status == "APPROVED"
         )
-        .order_by(Resource.created_at.desc())
+        .order_by(func.lower(Resource.title).asc(), Resource.id.asc())
         .all()
     )
+    return sorted(resources, key=lambda r: natural_sort_key(r.title or ""))
 
 
 def get_resource_by_id(db: Session, resource_id: int) -> Optional[Resource]:

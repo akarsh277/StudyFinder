@@ -2,6 +2,7 @@ from typing import List, Optional
 # pyrefly: ignore [missing-import]
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from database.models import Branch, Subject, Resource
+from database.crud import natural_sort_key
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Return main menu buttons below start message."""
@@ -106,9 +107,10 @@ def get_subjects_keyboard(
     prefix: str = "subj",
     back_callback: Optional[str] = None
 ) -> InlineKeyboardMarkup:
-    """Return inline keyboard listing subjects for a semester, plus PYQ section button."""
+    """Return inline keyboard listing subjects for a semester in alphabetical order, plus PYQ section button."""
+    sorted_subjects = sorted(subjects, key=lambda s: natural_sort_key(s.name))
     keyboard = []
-    for subject in subjects:
+    for subject in sorted_subjects:
         keyboard.append([
             InlineKeyboardButton(subject.name, callback_data=f"{prefix}_{subject.id}")
         ])
@@ -146,14 +148,15 @@ def get_resources_download_keyboard(
     is_chief: bool = False,
     manage_prefix: str = "access_manage"
 ) -> InlineKeyboardMarkup:
-    """Return keyboard with full-width download buttons, plus bottom action row for Chief."""
+    """Return keyboard with full-width download buttons in alphabetical order, plus bottom action row for Chief."""
+    sorted_resources = sorted(resources, key=lambda r: natural_sort_key(r.title or ""))
     keyboard = []
-    for res in resources:
+    for res in sorted_resources:
         button_text = f"⬇️ {res.title}"
         keyboard.append([
             InlineKeyboardButton(button_text, callback_data=f"download_{res.id}")
         ])
-    if is_chief and resources:
+    if is_chief and sorted_resources:
         keyboard.append([
             InlineKeyboardButton("✏️ Rename a File", callback_data=f"{manage_prefix}_rename"),
             InlineKeyboardButton("🗑️ Delete a File", callback_data=f"{manage_prefix}_delete")
@@ -170,9 +173,10 @@ def get_resources_manage_keyboard(
     action: str,
     back_callback: Optional[str] = None
 ) -> InlineKeyboardMarkup:
-    """Return keyboard listing resources full-width for renaming or deleting."""
+    """Return keyboard listing resources full-width in alphabetical order for renaming or deleting."""
+    sorted_resources = sorted(resources, key=lambda r: natural_sort_key(r.title or ""))
     keyboard = []
-    for res in resources:
+    for res in sorted_resources:
         if action == "rename":
             btn_text = f"✏️ {res.title}"
             cb = f"rename_{res.id}"
