@@ -1,6 +1,6 @@
 import logging
 from database.connection import engine, Base, get_db
-from database.crud import seed_initial_subjects, seed_initial_branches, copy_os_resources_to_cse_ai
+from database.crud import seed_initial_subjects, seed_initial_branches, copy_os_resources_to_cse_ai, copy_cn_resources_to_cse_ai
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ def init_db():
         seed_initial_branches(db)
         seed_initial_subjects(db)
         copy_os_resources_to_cse_ai(db)
+        copy_cn_resources_to_cse_ai(db)
     logger.info("Database initialization complete.")
 
 if __name__ == "__main__":

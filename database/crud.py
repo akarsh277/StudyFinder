@@ -269,6 +269,7 @@ def seed_initial_subjects(db: Session) -> None:
         {"name": "EPS", "semester": "CSE 3-1"},
         # CSE(AI) 3-1
         {"name": "OS", "semester": "CSE(AI) 3-1"},
+        {"name": "CN", "semester": "CSE(AI) 3-1"},
     ]
 
     for item in initial_data:
@@ -341,6 +342,68 @@ def copy_os_resources_to_cse_ai(db: Session) -> int:
     if copied_count > 0:
         db.commit()
         logger.info(f"Copied {copied_count} OS resources to CSE(AI) 3-1")
+    return copied_count
+
+
+def copy_cn_resources_to_cse_ai(db: Session) -> int:
+    """Copy all existing CN resources from CSE 3-1 to CSE(AI) 3-1."""
+    # Ensure target subject exists
+    target_subject = (
+        db.query(Subject)
+        .filter(Subject.name == "CN", Subject.semester == "CSE(AI) 3-1")
+        .first()
+    )
+    if not target_subject:
+        target_subject = Subject(name="CN", semester="CSE(AI) 3-1")
+        db.add(target_subject)
+        db.commit()
+        db.refresh(target_subject)
+
+    source_subject = (
+        db.query(Subject)
+        .filter(Subject.name == "CN", Subject.semester == "CSE 3-1")
+        .first()
+    )
+    if not source_subject:
+        return 0
+
+    source_resources = (
+        db.query(Resource)
+        .filter(Resource.subject_id == source_subject.id, Resource.status == "APPROVED")
+        .all()
+    )
+
+    copied_count = 0
+    for res in source_resources:
+        already_exists = (
+            db.query(Resource)
+            .filter(
+                Resource.semester == "CSE(AI) 3-1",
+                Resource.subject_id == target_subject.id,
+                Resource.title == res.title,
+                Resource.file_id == res.file_id,
+            )
+            .first()
+        )
+        if not already_exists:
+            new_res = Resource(
+                title=res.title,
+                semester="CSE(AI) 3-1",
+                subject_id=target_subject.id,
+                resource_type=res.resource_type,
+                file_id=res.file_id,
+                file_name=res.file_name,
+                uploaded_by=res.uploaded_by,
+                status="APPROVED",
+                download_count=0,
+                created_at=datetime.utcnow(),
+            )
+            db.add(new_res)
+            copied_count += 1
+
+    if copied_count > 0:
+        db.commit()
+        logger.info(f"Copied {copied_count} CN resources to CSE(AI) 3-1")
     return copied_count
 
 
