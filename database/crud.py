@@ -449,95 +449,92 @@ def increment_resource_download(db: Session, resource_id: int) -> None:
 
 
 def get_analytics_data(db: Session) -> Dict[str, Any]:
-    """Calculate all StudyFind 30-day analytics metrics directly from database using SQL aggregations."""
-    now = datetime.utcnow()
-    thirty_days_ago = now - timedelta(days=30)
+    """Calculate accurate StudyFind analytics metrics directly from database using SQL aggregations."""
+    ist = ZoneInfo("Asia/Kolkata")
+    now_ist = datetime.now(ist)
+    start_today_ist = datetime(now_ist.year, now_ist.month, now_ist.day, 0, 0, 0, tzinfo=ist)
+    start_today_utc = start_today_ist.astimezone(timezone.utc).replace(tzinfo=None)
+    seven_days_ago_utc = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
 
-    # Registered Users
+    # Total Registered Students
     total_users = db.query(func.count(User.id)).scalar() or 0
 
-    # Active Visitors (Unique Telegram users in last 30 days)
-    unique_visitors = db.query(func.count(func.distinct(UserEvent.telegram_id))).filter(UserEvent.created_at >= thirty_days_ago).scalar() or 0
-    if unique_visitors == 0:
-        unique_visitors = total_users
+    # Active This Week (Unique students with activity in last 7 days)
+    active_this_week = (
+        db.query(func.count(func.distinct(UserEvent.telegram_id)))
+        .filter(UserEvent.created_at >= seven_days_ago_utc)
+        .scalar() or 0
+    )
 
-    # Page Views & Interactions in last 30 days
-    total_views = db.query(func.count(UserEvent.id)).filter(UserEvent.created_at >= thirty_days_ago).scalar() or 0
-    if total_views == 0:
-        total_downloads_val = db.query(func.coalesce(func.sum(Resource.download_count), 0)).scalar() or 0
-        total_views = max(total_users * 3, total_downloads_val * 2, 1)
+    # Bounce Rate (% of visitors with only 1 event total)
+    total_visitors = db.query(func.count(func.distinct(UserEvent.telegram_id))).scalar() or total_users or 1
+    single_event_users = (
+        db.query(UserEvent.telegram_id)
+        .group_by(UserEvent.telegram_id)
+        .having(func.count(UserEvent.id) == 1)
+        .count()
+    )
+    bounce_rate = round((single_event_users / total_visitors) * 100) if total_visitors > 0 else 0
 
-    # Bounce Rate Calculation (% of visitors with only 1 event)
-    try:
-        single_event_users = (
-            db.query(UserEvent.telegram_id)
-            .filter(UserEvent.created_at >= thirty_days_ago)
-            .group_by(UserEvent.telegram_id)
-            .having(func.count(UserEvent.id) == 1)
-            .count()
+    # Downloads
+    today_downloads = (
+        db.query(func.count(UserEvent.id))
+        .filter(UserEvent.event_type == "DOWNLOAD", UserEvent.created_at >= start_today_utc)
+        .scalar() or 0
+    )
+    week_downloads = (
+        db.query(func.count(UserEvent.id))
+        .filter(UserEvent.event_type == "DOWNLOAD", UserEvent.created_at >= seven_days_ago_utc)
+        .scalar() or 0
+    )
+    res_downloads_sum = db.query(func.coalesce(func.sum(Resource.download_count), 0)).scalar() or 0
+    event_downloads_count = db.query(func.count(UserEvent.id)).filter(UserEvent.event_type == "DOWNLOAD").scalar() or 0
+    all_time_downloads = max(res_downloads_sum, event_downloads_count)
+
+    # Peak Day (Day with highest downloads in history)
+    date_col = func.date(UserEvent.created_at)
+    peak_row = (
+        db.query(
+            date_col.label("p_date"),
+            func.count(func.distinct(UserEvent.telegram_id)).label("users"),
+            func.count(UserEvent.id).label("downloads")
         )
-        if unique_visitors > 0 and single_event_users > 0:
-            bounce_rate = round((single_event_users / unique_visitors) * 100)
-        else:
-            bounce_rate = 18
-    except Exception:
-        bounce_rate = 18
-
-    # Peak Day (busiest day in last 30 days)
-    try:
-        date_col = func.date(UserEvent.created_at)
-        peak_row = (
-            db.query(
-                date_col.label("event_date"),
-                func.count(func.distinct(UserEvent.telegram_id)).label("v_count"),
-                func.count(UserEvent.id).label("p_count")
-            )
-            .filter(UserEvent.created_at >= thirty_days_ago)
-            .group_by(date_col)
-            .order_by(func.count(UserEvent.id).desc())
-            .first()
-        )
-        if peak_row and peak_row.v_count > 0:
-            peak_visitors = peak_row.v_count
-            peak_views = peak_row.p_count
-        else:
-            peak_visitors = max(round(unique_visitors * 0.4), 1)
-            peak_views = max(round(total_views * 0.35), 1)
-    except Exception:
-        peak_visitors = max(round(unique_visitors * 0.4), 1)
-        peak_views = max(round(total_views * 0.35), 1)
-
-    # Top Section (e.g. CSE 3-1 or DBMS)
-    top_subject = (
-        db.query(Subject.name, func.coalesce(func.sum(Resource.download_count), 0).label("t_dl"))
-        .join(Resource, Subject.id == Resource.subject_id)
-        .filter(Resource.status == "APPROVED")
-        .group_by(Subject.id, Subject.name)
-        .order_by(func.sum(Resource.download_count).desc())
+        .filter(UserEvent.event_type == "DOWNLOAD")
+        .group_by(date_col)
+        .order_by(func.count(UserEvent.id).desc())
         .first()
     )
-    if top_subject:
-        top_section_name = top_subject.name
-        top_section_downloads = top_subject.t_dl or 0
-        top_section_views = max(top_section_downloads * 2, 1)
+    if peak_row:
+        p_dt = peak_row.p_date
+        if isinstance(p_dt, str):
+            p_dt = datetime.strptime(p_dt, "%Y-%m-%d").date()
+        peak_day_str = p_dt.strftime("%d %b")
+        peak_day_users = peak_row.users
+        peak_day_downloads = peak_row.downloads
     else:
-        top_section_name = "CSE 3-1"
-        top_section_views = max(round(total_views * 0.4), 1)
-        top_section_downloads = max(round(total_views * 0.3), 1)
+        peak_day_str = "N/A"
+        peak_day_users = 0
+        peak_day_downloads = 0
 
-    # Resource statistics
-    total_resources = db.query(func.count(Resource.id)).scalar() or 0
-    approved_resources = db.query(func.count(Resource.id)).filter(Resource.status == "APPROVED").scalar() or 0
-    pending_resources = db.query(func.count(Resource.id)).filter(Resource.status == "PENDING").scalar() or 0
-    rejected_resources = db.query(func.count(Resource.id)).filter(Resource.status == "REJECTED").scalar() or 0
+    # Top Subjects (Top 5 subjects grouped by name)
+    top_subjects_query = (
+        db.query(Subject.name, func.coalesce(func.sum(Resource.download_count), 0).label("dls"))
+        .join(Resource, Subject.id == Resource.subject_id)
+        .filter(Resource.status == "APPROVED")
+        .group_by(Subject.name)
+        .order_by(func.sum(Resource.download_count).desc(), Subject.name.asc())
+        .limit(5)
+        .all()
+    )
+    top_subjects = [
+        {"name": r[0], "downloads": r[1]}
+        for r in top_subjects_query if r[1] > 0
+    ]
 
-    # Total downloads
-    total_downloads = db.query(func.coalesce(func.sum(Resource.download_count), 0)).scalar() or 0
-
-    # Top resources (Top 5 approved resources ordered by download_count desc)
+    # Top Resources (Top 5 individual resources by download count)
     top_resources_query = (
         db.query(Resource.title, Resource.download_count)
-        .filter(Resource.status == "APPROVED")
+        .filter(Resource.status == "APPROVED", Resource.download_count > 0)
         .order_by(Resource.download_count.desc(), Resource.id.asc())
         .limit(5)
         .all()
@@ -548,20 +545,16 @@ def get_analytics_data(db: Session) -> Dict[str, Any]:
     ]
 
     return {
-        "active_visitors": unique_visitors,
         "total_users": total_users,
-        "total_views": total_views,
+        "active_this_week": active_this_week,
         "bounce_rate": bounce_rate,
-        "peak_visitors": peak_visitors,
-        "peak_views": peak_views,
-        "top_section_name": top_section_name,
-        "top_section_views": top_section_views,
-        "top_section_downloads": top_section_downloads,
-        "total_resources": total_resources,
-        "approved_resources": approved_resources,
-        "pending_resources": pending_resources,
-        "rejected_resources": rejected_resources,
-        "total_downloads": total_downloads,
+        "today_downloads": today_downloads,
+        "week_downloads": week_downloads,
+        "all_time_downloads": all_time_downloads,
+        "peak_day_str": peak_day_str,
+        "peak_day_users": peak_day_users,
+        "peak_day_downloads": peak_day_downloads,
+        "top_subjects": top_subjects,
         "top_resources": top_resources,
     }
 

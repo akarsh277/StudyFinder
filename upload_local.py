@@ -108,7 +108,10 @@ async def upload_local_file(
             print("Please open @HighlessbestBot in Telegram and send /start first!", flush=True)
             return
 
-    print(f"\nUploading '{file_name}' ({file_size_mb:.2f} MB) to Telegram server...", flush=True)
+    ext = os.path.splitext(file_name)[1]
+    target_upload_filename = f"{title}{ext}" if not title.lower().endswith(ext.lower()) else title
+
+    print(f"\nUploading '{file_name}' as '{target_upload_filename}' ({file_size_mb:.2f} MB) to Telegram server...", flush=True)
 
     # Set generous HTTP timeouts (5 mins write/read timeout for large files)
     request = HTTPXRequest(
@@ -124,13 +127,15 @@ async def upload_local_file(
                 msg = await bot.send_document(
                     chat_id=target_chat_id,
                     document=f,
+                    filename=target_upload_filename,
                     caption=f"📄 Admin Upload: {title}\nSemester: {semester} | Subject: {subject_official_name}",
                     read_timeout=300.0,
                     write_timeout=300.0,
                     connect_timeout=60.0
                 )
             file_id = msg.document.file_id
-            print(f"Success: Telegram File ID obtained: {file_id[:25]}...", flush=True)
+            uploaded_name = msg.document.file_name or target_upload_filename
+            print(f"Success: Telegram File ID obtained: {file_id[:25]}... (Saved as: '{uploaded_name}')", flush=True)
     except Exception as e:
         print(f"Error: Failed to upload document to Telegram: {e}", flush=True)
         print("Make sure you have sent /start to @HighlessbestBot in Telegram first!", flush=True)
@@ -145,7 +150,7 @@ async def upload_local_file(
             subject_id=subject_id,
             resource_type=resource_type,
             file_id=file_id,
-            file_name=file_name,
+            file_name=uploaded_name,
             uploaded_by=target_chat_id,
             status=status
         )
